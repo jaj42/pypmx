@@ -35,7 +35,7 @@ class Eleveld:
         | THETA(2)  | V2ref         | Reference volume of peripheral compartment 1 = 25.501 L      |
         | THETA(3)  | V3ref         | Reference volume of peripheral compartment 2 = 272.817 L     |
         | THETA(4)  | CLref_male    | Reference clearance (male) = 1.790 L/min                     |
-        | THETA(5)  | Q2ref         | Reference inter-compartmental clearance 2 (adult) = 1.750 L/min |
+        | THETA(5)  | Q2ref         | Reference inter-compartmental clearance 2 = 1.750 L/min      |
         | THETA(6)  | Q3ref         | Reference inter-compartmental clearance 3 = 1.109 L/min      |
         | THETA(7)  | σ_log         | Log-error                                                    |
         | THETA(8)  | E50_CL        | Maturation CL E50 = 42.3 weeks                               |

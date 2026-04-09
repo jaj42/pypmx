@@ -7,13 +7,13 @@ from typing import Callable, Protocol
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
-from pint import UnitRegistry
 from scipy import signal
 
 from pmxpy import assets
 
 
 def load_units():
+    from pint import UnitRegistry
     ureg = UnitRegistry()
     # Q_ = ureg.Quantity
     # U_ = ureg.Unit
@@ -56,17 +56,15 @@ def continuize_order_one(
     return sub_func
 
 
-def continuize_order_zero(
-    times: NDArray, values: NDArray, left: float | None = None
-) -> Callable[[float], float]:
-    @np.vectorize(otypes=[float])
-    def piecewise_rate(t):
-        idx = bisect.bisect_right(times, t) - 1
-        if idx < 0:
-            return left if left is not None else values[idx]
-        return values[idx]
+def continuize_order_zero(infu_time, infu_rate, r0: float = 0):
+    def run(t):
+        if t < infu_time[0]:
+            return r0
+        idx = np.searchsorted(infu_time, t, side="right") - 1
+        idx = np.clip(idx, 0, len(infu_rate) - 1)
+        return infu_rate[idx]
 
-    return piecewise_rate
+    return run
 
 
 def value_change_indices(data: NDArray):
@@ -75,29 +73,6 @@ def value_change_indices(data: NDArray):
     changes = np.flatnonzero(ddata)
     changes = np.insert(changes, 0, 0)
     return changes
-
-
-def savgol(series, time_unit, window, order):
-    conv = time_unit / timedelta(seconds=1)
-    old_idx_conv = series.index.copy() * conv
-    npoints = np.ceil(old_idx_conv.max() - old_idx_conv.min())
-    new_idx = old_idx_conv.min() + np.arange(npoints)
-
-    new_values = np.interp(new_idx, old_idx_conv, series.to_numpy())
-
-    window = np.floor(window * conv)
-    if not window % 2:
-        # window is even, we need odd
-        window += 1
-    filtered = signal.savgol_filter(new_values, int(window), order)
-    newname = f"{series.name}-filtered"
-    newseries = pd.Series(filtered, index=new_idx / conv, name=newname)
-    return newseries
-
-
-def round_to_n_sig_figs(x, n=2):
-    """Round to n significant figures"""
-    return round(x, -int(floor(log10(abs(x)))) + (n - 1))
 
 
 class ConcentrationFunction(Protocol):

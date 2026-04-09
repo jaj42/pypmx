@@ -274,7 +274,7 @@ class PropofolRemifentanil:
         )
         return State_array(HRi=res.y[0, :], SVi=res.y[1, :], TPR=res.y[2, :]), res.t
 
-    def calculate_at(
+    def __call__(
         self, t: ArrayLike
     ) -> tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]:
         p = self.parameters
