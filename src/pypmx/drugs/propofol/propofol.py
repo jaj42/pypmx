@@ -5,8 +5,8 @@ from typing import NamedTuple
 
 import numpy as np
 
-from pmxpy import leanbodymass
-from pmxpy.standard_models import pk_3comp
+from pypmx import leanbodymass
+from pypmx.standard_models import pk_3comp
 
 
 class Units(NamedTuple):

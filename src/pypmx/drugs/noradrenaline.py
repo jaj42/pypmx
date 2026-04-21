@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 
-from pmxpy.utils import ConcentrationFunction
+from pypmx.utils import ConcentrationFunction
 
 # # 5 ug/h = <Quantity(0.261015371, 'nanomole / minute')>
 # df["Babynoradrenaline-rate"] *= 0.261015371

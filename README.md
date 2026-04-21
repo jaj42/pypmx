@@ -1,11 +1,11 @@
-# PMXPY - Pharmacometric Models in Python
+# PyPMX - Pharmacometric Models in Python
 
 **Early development stage, for educational purposes only!**
 
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-ISC-blue.svg)](https://opensource.org/licenses/ISC)
 
-**PMXPY** is a Python library for pharmacometric modeling, providing implementations of pharmacokinetic (PK) and pharmacodynamic (PD) models for various drugs.
+**PyPMX** is a Python library for pharmacometric modeling, providing implementations of pharmacokinetic (PK) and pharmacodynamic (PD) models for various drugs.
 
 ## Features
 

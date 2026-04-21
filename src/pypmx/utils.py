@@ -9,7 +9,7 @@ import pandas as pd
 from numpy.typing import NDArray
 from scipy import signal
 
-from pmxpy import assets
+from pypmx import assets
 
 
 def load_units():

@@ -1,5 +1,5 @@
 [project]
-name = "pmxpy"
+name = "pypmx"
 version = "0.0.1"
 description = "Pharmacometric models and algorithms"
 authors = [{ name = "Jona JOACHIM", email = "jona@joachim.cc" }]
