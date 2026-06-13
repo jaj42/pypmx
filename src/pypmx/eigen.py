@@ -1,6 +1,7 @@
 import numpy as np
 
-def eigendecomposition(S,V1,ke0: float=None):
+
+def eigendecomposition(S, V1, ke0: float = None):
     # Eigenvalue decomposition
     eigvals, eigvecs = np.linalg.eig(S)
 
@@ -57,6 +58,7 @@ def calculate_impulse_response(lambdas, coefs, t):
     A_bolus = coefs * lambdas  # [L^-1]
     decay = np.exp(-lambdas[:, np.newaxis] * t[np.newaxis, :])
     return np.sum(A_bolus[:, np.newaxis] * decay, axis=0)
+
 
 def convolve(uir, inf, dt: float):
     npoints = len(uir)

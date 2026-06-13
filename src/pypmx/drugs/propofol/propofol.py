@@ -4,6 +4,7 @@ from math import exp, nan
 from typing import NamedTuple
 
 import numpy as np
+from scipy.special import expit
 
 from pypmx import leanbodymass
 from pypmx.standard_models import pk_3comp

@@ -66,7 +66,6 @@ class Minto:
         )  # fmt: skip
         self.ode = partial(pk_3comp, p=self.parameters._asdict())
 
-
     @property
     def system_matrix(self):
         p = self.parameters
