@@ -46,7 +46,7 @@ class Noradrenaline:
         self.calculate_parameters()
         self.update_parameters(params)
         if y0 is None:
-            p = self._params
+            p = self.params
             endo = p["EPROD"] / p["CL"]
             self._y0 = np.full(self.ode_info["ndim"], endo)
             self._y0[0] *= p["V1"]
@@ -71,25 +71,25 @@ class Noradrenaline:
         p["Q"] *= scale(0.75)
         p["EPROD"] *= scale(0.75)
         p["KE0"] *= scale(0.25)
-        self._params = p
+        self.params = p
 
     def update_parameters(self, params: dict[str, float] | None = None):
         if params is not None:
-            self._params.update(params)
-        p = self._params
-        self._params["K10"] = p["CL"] / p["V1"]
-        self._params["K12"] = p["Q"] / p["V1"]
-        self._params["K21"] = p["Q"] / p["V2"]
+            self.params.update(params)
+        p = self.params
+        self.params["K10"] = p["CL"] / p["V1"]
+        self.params["K12"] = p["Q"] / p["V1"]
+        self.params["K21"] = p["Q"] / p["V2"]
 
     def get_state(self):
         return self._y0
 
     def get_param(self, param):
-        return self._params[param]
+        return self.params[param]
 
     def ode(self, t, y, rate_func):
         A1, A2, Ce = y
-        p = self._params
+        p = self.params
         Tlag = p["PKLAG"] + p["PDLAG"]
         ddt_A1 = (
             A2 * p["K21"]
@@ -121,15 +121,15 @@ class Noradrenaline:
 
     def pd(self, Ce: NDArray, E0: float | None = None) -> NDArray:
         if E0 is None:
-            E0 = self._params["E0"]
-        gamma = self._params["GAMMA"]
-        Emax = self._params["EMAX"]
-        EC50 = self._params["EC50"]
+            E0 = self.params["E0"]
+        gamma = self.params["GAMMA"]
+        Emax = self.params["EMAX"]
+        EC50 = self.params["EC50"]
         return E0 + Emax * Ce**gamma / (EC50**gamma + Ce**gamma)
 
     def __call__(self, t: NDArray) -> tuple[NDArray, NDArray, NDArray, NDArray]:
         ode_t, A1, Ce = self.solve_ode(t)
-        Cp = A1 / self._params["V1"]
+        Cp = A1 / self.params["V1"]
         MAP = self.pd(Ce)
         return ode_t, Cp, Ce, MAP
 
@@ -145,5 +145,5 @@ class Noradrenaline:
         if rate is None:
             rate = self._rate
         if params is None:
-            params = self._params.copy()
+            params = self.params.copy()
         return Noradrenaline(self._covars, t0, y0, rate, params)
