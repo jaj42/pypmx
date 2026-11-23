@@ -3,6 +3,7 @@ from math import exp
 from typing import Any, ClassVar
 
 from pypmx import leanbodymass
+from pypmx.iiv import Omega
 from pypmx.pk import Covariates, LinearPKModel, PKParameters, Units
 
 
@@ -61,9 +62,22 @@ class Eleveld(LinearPKModel):
     Eleveld DJ, Proost JH, Vereecke H, Absalom AR, Olofsen E, Vuyk J, Struys MMRF.
     Anesthesiology. 2017 Jun;126(6):1005-1018.
     doi: 10.1097/ALN.0000000000001634.
+
+    IIV: exponential on V1, V2, V3, CL, Q2, Q3 (diagonal $OMEGA of the
+    published model; CV 33.0, 35.0, 111.7, 14.1, 23.7, 57.5 %).
     """
 
     units: ClassVar[Units] = Units(time="min", cp="ng/ml")
+    omega: ClassVar[Omega | None] = Omega.from_variances(
+        {
+            "V1": 1.035760e-01,
+            "V2": 1.153660e-01,
+            "V3": 8.097060e-01,
+            "CL": 1.973920e-02,
+            "Q2": 5.466160e-02,
+            "Q3": 2.854850e-01,
+        }
+    )
 
     def __init__(self, covars: Mapping[str, Any] | None = None):
         c = self._set_covariates(covars, Covariates)
@@ -111,13 +125,3 @@ class Eleveld(LinearPKModel):
             Q3=q3ref * (v3 / v3ref) ** 0.75 * _ageing(theta2, c.age),
             ke0=1.09 * _ageing(-0.0289, c.age),
         )
-
-    def bsv(self):
-        # $OMEGA
-        # 1.035760e-01 ; CV=33.0% V1
-        # 1.153660e-01 ; CV=35.0% V2
-        # 8.097060e-01 ; CV=111.7% V3
-        # 1.973920e-02 ; CV=14.1% CL
-        # 5.466160e-02 ; CV=23.7% Q2
-        # 2.854850e-01 ; CV=57.5% Q3
-        pass

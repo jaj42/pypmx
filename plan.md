@@ -190,7 +190,24 @@ Pattern for each drug:
 - Tests: `tci.model` plasma-target rate for Eleveld propofol is unchanged before and after.
 
 ### 7. (Optional follow-ups, not in scope unless requested)
-- **Shared IIV API.** Su models have `random_effects`/`covariance`/`sample_etas`, and Eleveld remifentanil has `bsv`. Unify them as an `omega` + `sample(rng)` on the base.
+- **Shared IIV API — DONE.**
+  - New `src/pypmx/iiv.py`:
+    - `Omega(names, cov, additive=())` holds the eta covariance. It checks that the matrix is symmetric and positive definite.
+    - It has two constructors. `from_variances` is NONMEM `$OMEGA` style (variances plus optional `{(a, b): cov}`). `from_cv` takes CV% and correlations and uses ω² = ln(1+CV²).
+    - It has `draw(rng, n)`, `sample(rng) -> {name: eta}` and `apply(values, eta)`. Etas are exponential by default and additive for the names in `additive`.
+  - The `RandomEffects` mixin defines `omega: ClassVar[Omega | None] = None`, `with_eta(eta)` (deterministic copy) and `sample(rng)` (random copy). Each model implements the hooks `_get_values`/`_set_values`. Etas act on the **current** values, so apply them to a typical model.
+  - `LinearPKModel` inherits the mixin. Omega names can be `pk` fields and/or `parameters` fields.
+  - Eleveld remifentanil: `bsv()` is replaced by `omega`, the diagonal `$OMEGA` of V1, V2, V3, CL, Q2 and Q3. No other linear model has an omega yet, because none was in the code. Calling `sample` on a model without one raises NotImplementedError.
+  - Su models (all three):
+    - `random_effects`/`covariance`/`sample_etas` are replaced by `omega`. The residual-error part moves to `residual_error`.
+    - The derived parameters and the default y0 are computed in `_derive()`, so `sample`/`with_eta` recompute kin_*, base_map, Emax_sv and y0.
+    - The constructor keeps `random_effects=True` (it samples eta and RUV in place) and gains `rng`. `sample_ruv(rng)` also takes `rng`. All sampling uses `np.random.Generator` instead of global `np.random`.
+    - Su propofol: the class dict is renamed `typical` and copied per instance. Before, `random_effects=True` mutated the class-level `parameters` dict.
+  - Golden snapshots are unchanged. `tests/test_iiv.py` checks:
+    - Omega against the legacy Su covariance construction (1e-14), validation, apply, and the moments of `draw`.
+    - The Eleveld remifentanil CVs and `with_eta`/`sample` (reproducibility, var(log CL) ≈ ω², the Css shift).
+    - An omega over both pk and `parameters` (a Noradrenaline subclass).
+    - For the Su models: zero eta equals the typical model, re-derivation, an additive eta, the `random_effects` flag with a seed, and that the class dict is not mutated.
 - **PD-only models.** The Su models should consume `Prediction.cp_function()` via `utils.continuize_order_one`, and use the single `utils.ConcentrationFunction` (it is currently duplicated in `su_variant.py`).
 - **Cross-check.** Check `advan/pk_advan.py` against `eig_advan` in tests, as a second independent solver.
 

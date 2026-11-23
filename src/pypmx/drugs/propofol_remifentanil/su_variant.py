@@ -1,11 +1,12 @@
-from functools import cached_property
+from collections.abc import Mapping
 from math import exp, log, nan
-from typing import Any, NamedTuple, Protocol
+from typing import Any, ClassVar, NamedTuple, Protocol
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.integrate import solve_ivp
 
+from pypmx.iiv import Omega, RandomEffects
 from pypmx.utils import filter_valid
 
 
@@ -80,7 +81,7 @@ class Parameters(NamedTuple):
     base_map: float = nan
 
 
-class PropofolRemifentanil:
+class PropofolRemifentanil(RandomEffects):
     units: Units = Units(
         time="min", cp_propfol="ug/ml", cp_remifentanil="ng/ml", effect="mmHg"
     )
@@ -112,20 +113,25 @@ class PropofolRemifentanil:
         age_emax_sv=0.478 / 10,
     )
 
-    random_effects: dict[str, float] = {
-        # variance / covariance
-        "base_sv": 0.0339,
-        "base_tpr": 0.0536,
-        "base_hr": 0.0241,
-        "ec50_prop_tpr": 0.444,
-        "emax_remi_tpr": 0.0792,
-        "sl_remi_hr": 0.0041,
-        "sl_remi_sv": 0.0093,
-        # random effects covariance
-        "cov_base_sv-base_tpr": -0.0249,
-        "cov_base_hr-base_tpr": -0.0235,
-        "cov_sl_remi_hr-sl_remi_sv": 0.0038,
-        # residual proportional error variance
+    omega: ClassVar[Omega | None] = Omega.from_variances(
+        {
+            "base_sv": 0.0339,
+            "base_tpr": 0.0536,
+            "base_hr": 0.0241,
+            "ec50_prop_tpr": 0.444,
+            "emax_remi_tpr": 0.0792,
+            "sl_remi_hr": 0.0041,
+            "sl_remi_sv": 0.0093,
+        },
+        {
+            ("base_sv", "base_tpr"): -0.0249,
+            ("base_tpr", "base_hr"): -0.0235,
+            ("sl_remi_hr", "sl_remi_sv"): 0.0038,
+        },
+        additive=("emax_remi_tpr", "sl_remi_hr", "sl_remi_sv"),
+    )
+    # residual proportional error variances
+    residual_error: ClassVar[dict[str, float]] = {
         "map": 0.0125,
         "hr": 0.0106,
         "sv": 0.0291,
@@ -138,23 +144,45 @@ class PropofolRemifentanil:
         covariates: dict[str, float] | None = None,
         y0: State | None = None,
         random_effects: bool = False,
+        rng: np.random.Generator | None = None,
     ):
+        """``random_effects=True`` samples the IIV (``omega``) and the residual
+        error once, from ``rng``. Use :meth:`sample` for a copy instead."""
         self._Cp_prop = Cp_prop
         self._Cp_remi = Cp_remi
         if covariates is None:
             covariates = {}
-        covars = Covariates(**filter_valid(covariates, Covariates))
+        self._covars = covars = Covariates(**filter_valid(covariates, Covariates))
+        self._y0_arg = y0
         self.parameters = self.parameters._replace(**filter_valid(covars, Parameters))
+        self._derive()
         if random_effects:
-            self.parameters = self.parameters._replace(**self.sample_etas())
-            self.ruv = self.sample_ruv()
+            self._apply_eta(self._require_omega().sample(rng))
+            self.ruv = self.sample_ruv(rng)
         else:
             self.ruv = {"map": 0, "hr": 0, "sv": 0}
+
+    def _get_values(self, names: tuple[str, ...]) -> dict[str, float]:
+        return {n: getattr(self.parameters, n) for n in names}
+
+    def _set_values(self, values: Mapping[str, float]) -> None:
+        self.parameters = self.parameters._replace(**values)
+        self._derive()
+
+    def sample_ruv(self, rng: np.random.Generator | None = None) -> dict[str, float]:
+        rng = np.random.default_rng() if rng is None else rng
+        vars = ["map", "hr", "sv"]
+        cov = np.diag([self.residual_error[k] for k in vars])
+        values = rng.multivariate_normal([0, 0, 0], cov)
+        return dict(zip(vars, map(float, values)))
+
+    def _derive(self) -> None:
+        """Derived parameters and default ``y0`` from the base parameters."""
         p = self.parameters
 
         self._y0 = (
-            y0
-            if y0 is not None
+            self._y0_arg
+            if self._y0_arg is not None
             else State(
                 HRi=p.base_hr * exp(p.tde_hr),
                 SVi=p.base_sv * exp(p.tde_sv),
@@ -163,7 +191,7 @@ class PropofolRemifentanil:
         )
 
         emax_prop_sv_lgt_age = p.emax_prop_sv_lgt * exp(
-            p.age_emax_sv * (covars.age - 35)
+            p.age_emax_sv * (self._covars.age - 35)
         )
 
         self.parameters = self.parameters._replace(
@@ -173,43 +201,6 @@ class PropofolRemifentanil:
             emax_prop_sv=emax_prop_sv_lgt_age / (1 + emax_prop_sv_lgt_age),
             base_map=p.base_hr * p.base_sv * p.base_tpr,
         )
-
-    @cached_property
-    def covariance(self):
-        params = [
-            "base_sv",
-            "base_tpr",
-            "base_hr",
-            "ec50_prop_tpr",
-            "emax_remi_tpr",
-            "sl_remi_hr",
-            "sl_remi_sv",
-        ]
-        cov = np.diag([self.random_effects[k] for k in params])
-        cov[0, 1] = self.random_effects["cov_base_sv-base_tpr"]
-        cov[1, 2] = self.random_effects["cov_base_hr-base_tpr"]
-        cov[5, 6] = self.random_effects["cov_sl_remi_hr-sl_remi_sv"]
-        cov_sym = np.triu(cov) + np.triu(cov, 1).T
-        return params, cov_sym
-
-    def sample_etas(self):
-        vars, cov = self.covariance
-        mu = np.array([getattr(self.parameters, k) for k in vars])
-        eta = np.random.multivariate_normal(np.zeros_like(mu), cov)
-        additive_params = {"emax_remi_tpr", "sl_remi_hr", "sl_remi_sv"}
-        values = {}
-        for i, var in enumerate(vars):
-            if var in additive_params:
-                values[var] = mu[i] + eta[i]
-            else:
-                values[var] = mu[i] * np.exp(eta[i])
-        return values
-
-    def sample_ruv(self):
-        vars = ["map", "hr", "sv"]
-        cov = np.diag([self.random_effects[k] for k in vars])
-        values = np.random.multivariate_normal([0, 0, 0], cov)
-        return dict(zip(vars, values))
 
     def calculate_map(self, t: float, y: State):
         p = self.parameters

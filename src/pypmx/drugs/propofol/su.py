@@ -1,11 +1,13 @@
 from collections.abc import Callable
-from functools import cached_property
+from collections.abc import Mapping
 from math import exp, log
-from typing import NamedTuple
+from typing import ClassVar, NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
+
+from pypmx.iiv import Omega, RandomEffects
 
 
 class State(NamedTuple):
@@ -33,7 +35,7 @@ class Covariates(NamedTuple):
     age: float = 35
 
 
-class Propofol:
+class Propofol(RandomEffects):
     units: Units = Units(
         time="min",
         cp="ug/ml",
@@ -43,7 +45,7 @@ class Propofol:
         effect_tpr="mmHg*ml/min",
     )
 
-    parameters: dict[str, float] = {
+    typical: ClassVar[dict[str, float]] = {
         # Baseline
         "base_hr": 53.6,
         "base_sv": 80.4,
@@ -65,20 +67,12 @@ class Propofol:
         "age_emax_sv": 0.0258,
     }
 
-    random_effects: dict[str, float] = {
-        # coefficients of variation
-        "base_sv": 18.0,
-        "base_hr": 17.0,
-        "base_tpr": 27.3,
-        "EC50_tpr": 63.7,
-        # correlation between random effects
-        "corr_base_sv-base_tpr": -0.662,
-        "corr_base_hr-base_tpr": -0.586,
-        # residual additive error variances
-        "map": 55.2,
-        "hr": 33.8,
-        "sv": 72.3,
-    }
+    omega: ClassVar[Omega | None] = Omega.from_cv(
+        {"base_sv": 18.0, "base_tpr": 27.3, "base_hr": 17.0, "EC50_tpr": 63.7},
+        {("base_sv", "base_tpr"): -0.662, ("base_tpr", "base_hr"): -0.586},
+    )
+    # residual additive error variances
+    residual_error: ClassVar[dict[str, float]] = {"map": 55.2, "hr": 33.8, "sv": 72.3}
 
     def __init__(
         self,
@@ -86,8 +80,10 @@ class Propofol:
         covariates: dict | None = None,
         y0: State | None = None,
         random_effects: bool = False,
+        rng: np.random.Generator | None = None,
     ):
-        p = self.parameters
+        """``random_effects=True`` samples the IIV (``omega``) and the residual
+        error once, from ``rng``. Use :meth:`sample` for a copy instead."""
         self._Cp = Cp
 
         if covariates is None or "age" not in covariates:
@@ -95,12 +91,18 @@ class Propofol:
         else:
             self._covars: Covariates = Covariates(age=covariates["age"])
 
+        self._y0_arg = y0
+        self.parameters: dict[str, float] = dict(self.typical)
+        self._derive()
         if random_effects:
-            self.parameters.update(self.sample_etas())
-            self.ruv = self.sample_ruv()
+            self._apply_eta(self._require_omega().sample(rng))
+            self.ruv = self.sample_ruv(rng)
         else:
             self.ruv = {"map": 0, "hr": 0, "sv": 0}
-        self.parameters.update(
+
+    def _derive(self) -> None:
+        p = self.parameters
+        p.update(
             {
                 "kin_tpr": p["kout"] * p["base_tpr"],
                 "kin_sv": p["kout"] * p["base_sv"],
@@ -114,42 +116,24 @@ class Propofol:
             }
         )
         self._y0 = (
-            y0
-            if y0 is not None
+            self._y0_arg
+            if self._y0_arg is not None
             else State(HRi=p["base_hr"], SVi=p["base_sv"], TPR=p["base_tpr"])
         )
 
-    @cached_property
-    def covariance(self):
-        params = ["base_sv", "base_tpr", "base_hr", "EC50_tpr"]
-        cv = np.array([self.random_effects[k] for k in params])
-        # Calculate SD from coefficients of variation
-        sd = np.sqrt(np.log((cv / 100) ** 2 + 1))
-        # Calculate scale factor for correlation matrix
-        sd_outer = np.outer(sd, sd)
+    def _get_values(self, names: tuple[str, ...]) -> dict[str, float]:
+        return {n: self.parameters[n] for n in names}
 
-        # Add correlation between random effects
-        corr = np.diag(np.ones_like(sd))
-        corr[0, 1] = self.random_effects["corr_base_sv-base_tpr"]
-        corr[1, 2] = self.random_effects["corr_base_hr-base_tpr"]
+    def _set_values(self, values: Mapping[str, float]) -> None:
+        self.parameters = {**self.parameters, **values}
+        self._derive()
 
-        # Calculate covariance matrix
-        corr_sym = np.triu(corr) + np.triu(corr, 1).T
-        covariance_matrix = corr_sym * sd_outer
-        return params, covariance_matrix
-
-    def sample_etas(self):
-        vars, cov = self.covariance
-        mu = np.array([self.parameters[k] for k in vars])
-        eta = np.random.multivariate_normal(np.zeros_like(mu), cov)
-        values = mu * np.exp(eta)
-        return dict(zip(vars, values))
-
-    def sample_ruv(self):
+    def sample_ruv(self, rng: np.random.Generator | None = None) -> dict[str, float]:
+        rng = np.random.default_rng() if rng is None else rng
         vars = ["map", "hr", "sv"]
-        cov = np.diag([self.random_effects[k] for k in vars])
-        values = np.random.multivariate_normal([0, 0, 0], cov)
-        return dict(zip(vars, values))
+        cov = np.diag([self.residual_error[k] for k in vars])
+        values = rng.multivariate_normal([0, 0, 0], cov)
+        return dict(zip(vars, map(float, values)))
 
     def calculate_map(self, t: float, y: State):
         p = self.parameters

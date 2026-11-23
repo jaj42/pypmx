@@ -32,6 +32,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from pypmx.eigen import eig_advan
+from pypmx.iiv import RandomEffects
 from pypmx.utils import filter_valid
 
 FloatArray = NDArray[np.float64]
@@ -154,7 +155,7 @@ class Prediction(NamedTuple):
     effect: FloatArray | None = None  # pd(ce), for models that define a PD
 
 
-class LinearPKModel:
+class LinearPKModel(RandomEffects):
     """Base class for linear PK models (see module docstring).
 
     Subclasses set ``units``, ``covariate_ranges`` (studied ``(low, high)``
@@ -165,6 +166,10 @@ class LinearPKModel:
     ``Parameters`` NamedTuple, declared in the subclass as
     ``parameters: Parameters``). Models with a PD override :meth:`pd`, and
     :meth:`simulate` then fills ``Prediction.effect``.
+
+    Models with published IIV set ``omega`` (:class:`pypmx.iiv.Omega`) over
+    ``pk`` and/or ``parameters`` field names; ``sample(rng)`` and
+    ``with_eta(eta)`` then return individual models (see :mod:`pypmx.iiv`).
     """
 
     units: ClassVar[Units]
@@ -254,6 +259,22 @@ class LinearPKModel:
         new = copy.copy(self)
         new.pk = self.pk._replace(**kw)
         return new
+
+    # ---- IIV hooks (pypmx.iiv.RandomEffects) ------------------------------
+
+    def _get_values(self, names: tuple[str, ...]) -> dict[str, float]:
+        params = getattr(self, "parameters", None)
+        return {
+            n: getattr(self.pk if n in PKParameters._fields else params, n)
+            for n in names
+        }
+
+    def _set_values(self, values: Mapping[str, float]) -> None:
+        pk_kw = {k: v for k, v in values.items() if k in PKParameters._fields}
+        self.pk = self.pk._replace(**pk_kw)
+        if other := {k: v for k, v in values.items() if k not in pk_kw}:
+            params: Any = getattr(self, "parameters")
+            self.parameters = params._replace(**other)
 
     # ---- covariates ------------------------------------------------------
 
