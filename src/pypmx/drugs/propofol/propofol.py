@@ -1,4 +1,3 @@
-import warnings
 from collections.abc import Mapping
 from math import exp, nan
 from typing import Any, ClassVar, NamedTuple
@@ -213,85 +212,100 @@ class Schnider(LinearPKModel):
         k21 = (1.29 - 0.024 * (c.age - 53)) / (18.9 - 0.391 * (c.age - 53))
         k31 = 0.0035
 
-        Q2 = k12 * v1
-        Q3 = k13 * v1
-        self.pk = PKParameters(
-            V1=v1,
-            V2=Q2 / k21,
-            V3=Q3 / k31,
-            CL=k10 * v1,
-            Q2=Q2,
-            Q3=Q3,
-            ke0=0.456,
+        self.pk = PKParameters.from_micro(
+            V1=v1, k10=k10, k12=k12, k21=k21, k13=k13, k31=k31, ke0=0.456
         )
 
 
-class Marsh:
-    units: Units = Units(time="min", cp="ug/ml")
+class Marsh(LinearPKModel):
+    """
+    Marsh propofol model (as in the Diprifusor)
 
-    def __init__(self, covars: Covariates):
-        weight = covars.weight
+    Units:
+    weight (kg), time (min), volumes (L), clearances (L/min),
+    concentrations (ug/ml)
 
-        self.v1 = 0.228 * weight
-        self.v2 = 0.463 * weight
-        self.v3 = 2.893 * weight
+    Reference:
+    Marsh B, White M, Morton N, Kenny GN. Pharmacokinetic model driven infusion
+    of propofol in children. Br J Anaesth. 1991;67(1):41-48.
+    ke0 0.26 /min as in the Diprifusor.
 
-        self.k10 = 0.119
-        self.k12 = 0.112
-        self.k13 = 0.042
-        self.k21 = 0.055
-        self.k31 = 0.0031
+    Defined by V1 = 0.228·weight and the micro rate constants;
+    ``V2 = Q2/k21`` (≈ 0.464·weight) and ``V3 = Q3/k31`` (≈ 3.09·weight).
+    """
 
-        self.keo = 0.26
+    units: ClassVar[Units] = Units(time="min", cp="ug/ml")
 
-
-class Kataria:
-    units: Units = Units(time="min", cp="ug/ml")
-
-    def __init__(self, covars: Covariates):
-        age = covars.age
-        weight = covars.weight
-
-        if not 2.99 < age < 12:
-            warnings.warn("Age out of range of model validation (3-11)")
-
-        self.v1 = 0.38 * weight
-        self.v2 = (0.59 * weight) + (3.1 * age) - 13
-        self.v3 = 6.12 * weight
-
-        self.Q1 = 0.037 * weight
-        self.Q2 = 0.063 * weight
-        self.Q3 = 0.025 * weight
-
-        self.k10 = self.Q1 / self.v1
-        self.k12 = self.Q2 / self.v1
-        self.k13 = self.Q3 / self.v1
-        self.k21 = (self.k12 * self.v1) / self.v2
-        self.k31 = (self.k13 * self.v1) / self.v3
-
-        self.keo = 0
+    def __init__(self, covars: Mapping[str, Any] | None = None):
+        c = self._set_covariates(covars, Covariates)
+        self.pk = PKParameters.from_micro(
+            V1=0.228 * c.weight,
+            k10=0.119,
+            k12=0.112,
+            k21=0.055,
+            k13=0.042,
+            k31=0.0031,
+            ke0=0.26,
+        )
 
 
-class Paedfusor:
-    units: Units = Units(time="min", cp="ug/ml")
+class Kataria(LinearPKModel):
+    """
+    Kataria paediatric propofol model (no effect site)
 
-    def __init__(self, covars: Covariates):
-        age = covars.age
-        weight = covars.weight
+    Units:
+    age (years), weight (kg), time (min), volumes (L), clearances (L/min),
+    concentrations (ug/ml)
 
-        if age < 1:
-            warnings.warn("age below that for which model is intended")
-        elif age > 12:
-            warnings.warn("Warning: Patient older than intended for model")
+    Reference:
+    Kataria BK, Ved SA, Nicodemus HF, Hoy GR, Lea D, Dubois MY, Mandema JW,
+    Shafer SL. The pharmacokinetics of propofol in children using three
+    different data analysis approaches. Anesthesiology. 1994;80(1):104-122.
+    """
 
-        self.v1 = 0.46 * weight
-        self.v2 = 0.95 * weight
-        self.v3 = 5.85 * weight
+    units: ClassVar[Units] = Units(time="min", cp="ug/ml")
+    covariate_ranges: ClassVar[dict[str, tuple[float, float]]] = {"age": (3, 12)}
 
-        self.k10 = 0.1527 * (weight ** (-0.3))
-        self.k12 = 0.114
-        self.k13 = 0.042
-        self.k21 = 0.055
-        self.k31 = 0.0033
+    def __init__(self, covars: Mapping[str, Any] | None = None):
+        c = self._set_covariates(covars, Covariates)
+        self.pk = PKParameters(
+            V1=0.38 * c.weight,
+            V2=0.59 * c.weight + 3.1 * c.age - 13,
+            V3=6.12 * c.weight,
+            CL=0.037 * c.weight,
+            Q2=0.063 * c.weight,
+            Q3=0.025 * c.weight,
+        )
 
-        self.keo = 0
+
+class Paedfusor(LinearPKModel):
+    """
+    Paedfusor propofol model (no effect site)
+
+    Units:
+    age (years), weight (kg), time (min), volumes (L), clearances (L/min),
+    concentrations (ug/ml)
+
+    Reference:
+    Absalom A, Amutike D, Lal A, White M, Kenny GN. Accuracy of the
+    'Paedfusor' in children undergoing cardiac surgery or catheterization.
+    Br J Anaesth. 2003;91(4):507-513.
+
+    Defined by V1 = 0.46·weight and the micro rate constants
+    (k10 = 0.1527·weight^-0.3); ``V2 = Q2/k21``, ``V3 = Q3/k31``. Only the
+    1-12 year form is implemented.
+    """
+
+    units: ClassVar[Units] = Units(time="min", cp="ug/ml")
+    covariate_ranges: ClassVar[dict[str, tuple[float, float]]] = {"age": (1, 12)}
+
+    def __init__(self, covars: Mapping[str, Any] | None = None):
+        c = self._set_covariates(covars, Covariates)
+        self.pk = PKParameters.from_micro(
+            V1=0.46 * c.weight,
+            k10=0.1527 * c.weight**-0.3,
+            k12=0.114,
+            k21=0.055,
+            k13=0.042,
+            k31=0.0033,
+        )

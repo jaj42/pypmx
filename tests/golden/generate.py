@@ -357,7 +357,10 @@ def pk_output(
     """
     infu_time, infu_rate = regimen(meta["model"])
     meta["infu_time"], meta["infu_rate"] = list(infu_time), list(infu_rate)
-    rate = step_function(infu_time, [r / time_scale for r in infu_rate])
+    # Breakpoints and rates both in the model's time unit.
+    rate = step_function(
+        [t * time_scale for t in infu_time], [r / time_scale for r in infu_rate]
+    )
     tt = TIME * time_scale
     y = solve_piecewise(
         rhs, np.zeros(n_states), tt, [t * time_scale for t in infu_time], rate
@@ -454,6 +457,7 @@ def compute_namedtuple(meta: dict[str, Any]) -> dict[str, Any]:
 
 
 def compute_attribute(meta: dict[str, Any]) -> dict[str, Any]:
+    # Pre-refactor API (v1, k10..k31, keo attributes), removed in plan step 5.
     covars = propofol_models.propofol.Covariates(**meta["covars"])
     m = ATTRIBUTE_MODELS[meta["model"]](covars)
     k = {n: float(getattr(m, n)) for n in MICRO_NAMES}
@@ -471,7 +475,8 @@ def compute_attribute(meta: dict[str, Any]) -> dict[str, Any]:
 
 
 def compute_sufentanil(meta: dict[str, Any]) -> dict[str, Any]:
-    m = GeptsSufentanil()
+    # Pre-refactor API (seconds, concentration states), removed in plan step 5.
+    m: Any = GeptsSufentanil()
     sp = m._params
     k = {n: sp[n] * 60 for n in MICRO_NAMES}
     params = macro_from_micro(sp["V1"], k, sp["ke0"] * 60)
@@ -485,7 +490,9 @@ def compute_sufentanil(meta: dict[str, Any]) -> dict[str, Any]:
 
 
 def compute_cefazolin(meta: dict[str, Any]) -> dict[str, Any]:
-    m = Cefazolin(meta["options"]["CrCL"], y0=[0.0, 0.0])
+    # Pre-refactor API (seconds, concentration states), removed in plan step 5.
+    old_cls: Any = Cefazolin
+    m = old_cls(meta["options"]["CrCL"], y0=[0.0, 0.0])
     cp_ = m._params
     params = {
         "V1": cp_["Vc"],

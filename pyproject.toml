@@ -35,12 +35,3 @@ dev = [
 [tool.ty.environment]
 python-version = "3.10"
 root = ["src", "tests"]
-
-[tool.ty.src]
-# Legacy modules, removed or rewritten during the PK API unification (plan.md
-# steps 3-5). Do not add new files here.
-exclude = [
-    "src/pypmx/drugs/alfentanil.py",
-    "src/pypmx/drugs/cefazolin.py",
-    "src/pypmx/drugs/sufentanil.py",
-]

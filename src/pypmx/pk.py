@@ -68,6 +68,35 @@ class PKParameters(NamedTuple):
     Q3: float = 0.0
     ke0: float = 0.0
 
+    @classmethod
+    def from_micro(
+        cls,
+        V1: float,
+        k10: float,
+        k12: float = 0.0,
+        k21: float = 0.0,
+        k13: float = 0.0,
+        k31: float = 0.0,
+        ke0: float = 0.0,
+    ) -> PKParameters:
+        """Macro parameters of a model defined by V1 and micro rate constants.
+
+        ``CL = k10·V1``, ``Q = k1i·V1`` and ``Vi = Q/ki1``. Published peripheral
+        volumes are often rounded and slightly inconsistent with the rate
+        constants; deriving them keeps the dynamics exact.
+        """
+        Q2 = k12 * V1
+        Q3 = k13 * V1
+        return cls(
+            V1=V1,
+            CL=k10 * V1,
+            V2=Q2 / k21 if Q2 else nan,
+            V3=Q3 / k31 if Q3 else nan,
+            Q2=Q2,
+            Q3=Q3,
+            ke0=ke0,
+        )
+
     @property
     def n_cmt(self) -> int:
         if self.Q2 == 0:

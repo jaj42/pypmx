@@ -24,17 +24,22 @@ import pytest
 from golden import generate
 from pypmx.drugs import (
     AllegaertParacetamol,
+    Cefazolin,
     DyckDexmedetomidine,
     EleveldPropofol,
+    EleveldRemifentanil,
+    GeptsSufentanil,
     GrassinDelyleTranexamicAcid,
     HannivoortDexmedetomidine,
+    KatariaPropofol,
     KuipersLidocaine,
+    MarshPropofol,
+    MintoRemifentanil,
     Noradrenaline,
+    PaedfusorPropofol,
+    SchniderPropofol,
     ZomorodiMidazolam,
 )
-from pypmx.drugs.propofol import Schnider
-from pypmx.drugs.remifentanil import Eleveld as EleveldRemifentanil
-from pypmx.drugs.remifentanil import Minto
 from pypmx.pk import LinearPKModel
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
@@ -94,15 +99,25 @@ def noradrenaline_adapter(meta: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def cefazolin(covars: dict[str, Any], CrCL: float) -> Cefazolin:
+    """Old ``Cefazolin(CrCL)`` option -> ``CrCL`` covariate (0 meant unknown)."""
+    return Cefazolin(covars | {"CrCL": CrCL or None})
+
+
 ADAPTERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "Noradrenaline": noradrenaline_adapter,
 } | {
     name: linear_pk_adapter(cls)
     for name, cls in {
         "EleveldPropofol": EleveldPropofol,
-        "Schnider": Schnider,
+        "Schnider": SchniderPropofol,
+        "Marsh": MarshPropofol,
+        "Kataria": KatariaPropofol,
+        "Paedfusor": PaedfusorPropofol,
         "EleveldRemifentanil": EleveldRemifentanil,
-        "Minto": Minto,
+        "Minto": MintoRemifentanil,
+        "GeptsSufentanil": GeptsSufentanil,
+        "Cefazolin": cefazolin,
         "HannivoortDexmedetomidine": HannivoortDexmedetomidine,
         "DyckDexmedetomidine": DyckDexmedetomidine,
         "GrassinDelyleTranexamicAcid": GrassinDelyleTranexamicAcid,

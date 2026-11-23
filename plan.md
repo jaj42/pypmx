@@ -155,7 +155,19 @@ Pattern for each drug:
   - `simulate` matches `solve_ivp(m.ode)` for an infusion with lag.
   - The lag shifts the response by `PKLAG+PDLAG`.
 
-### 5. Migrate the legacy models and remove dead code
+### 5. Migrate the legacy models and remove dead code — DONE
+**Outcome / deviations** (the original spec follows below):
+- New `PKParameters.from_micro(V1, k10, k12, k21, k13, k31, ke0)` (CL = k10·V1, Q = k·V1, V = Q/k). Marsh, Paedfusor, Gepts, Maitre and Schnider use it. Kataria is written in its published macro form.
+- Marsh/Kataria/Paedfusor take a covariate mapping (propofol `Covariates`), like the other models. `keo` is gone: Marsh has ke0 0.26, while Kataria and Paedfusor have no effect site. `covariate_ranges`: Kataria age (3, 12), Paedfusor age (1, 12). Both bounds are inclusive; before, Kataria warned at 12 and Paedfusor did not.
+- Sufentanil is now `drugs.sufentanil.Gepts` (still exported as `GeptsSufentanil`), in min, µg and ng/ml. It has no covariates; `covars` is accepted and ignored, and `repr` is `Gepts()`.
+- Cefazolin is now `drugs.cefazolin.Lanoiselee` (exported as `Cefazolin`), in min, mg and mg/L. **`CrCL` is a covariate** (`Cefazolin({"CrCL": 80})`), not a positional argument. `None` (the default) selects the base model (CL 2.87 L/h). CrCL ≤ 0 raises ValueError; the old code silently used the base model for 0.
+- `drugs/alfentanil.py` is **rewritten**, not deleted: `Maitre(LinearPKModel)` (exported as `MaitreAlfentanil`), with the parameters taken from the broken old file (V1 by sex, CL/k31 age > 40, ke0 0.77). It has no golden snapshot, because the old code never ran.
+- `drugs/__init__` also exports `SchniderPropofol`, `MarshPropofol`, `KatariaPropofol`, `PaedfusorPropofol`, `MintoRemifentanil` and `EleveldRemifentanil`, and all of them are in `all`. The README table and a usage example are updated.
+- **Golden snapshots regenerated (Cefazolin_*, GeptsSufentanil_default):** for the seconds models, `generate.pk_output` evaluated a minute-based `step_function` at seconds. At t = 120 s it looked up rate index 2 (0), so the maintenance infusion was never given. The fix is to scale the breakpoints by `time_scale`. The 5 files were regenerated from the pre-refactor code (HEAD worktree). Before the fix, the new models matched the buggy snapshots to 1e-10 when maintenance was dropped.
+- `generate.py` keeps its old-API branches, typed `Any`; they can no longer run. The class names it imports still exist, so the `cases.py` split was not needed. The ty exclude list is gone. `ruff check` still reports 3 pre-existing E741 (`I`) in the untouched `advan/pk_advan.py`.
+- Tests: `test_linear_models.py` gains Marsh, Kataria, Paedfusor, Gepts, Cefazolin (± CrCL) and Maitre in the shared checks. It also tests `from_micro`, Marsh volumes, paediatric range warnings and Kataria/Paedfusor parameters, Gepts volumes and t½ (≈ 739 min vs 769 published), the Cefazolin CrCL model and t½β, and Maitre V1/CL/age effect and t½β.
+
+**Original spec:**
 - Convert Marsh, Kataria and Paedfusor to macro parameters (`Q2 = k12·V1`, `V2 = Q2/k21`, …) on the base class, and fix `keo` → `ke0`. Kataria and Paedfusor warnings move to `covariate_ranges`.
 - Rewrite Sufentanil (Gepts) and Cefazolin as stateless base-class models **in minutes**. The datetime/`rate` setter/`give_bolus` state machine is dropped (the user can keep state in the app layer).
 - Delete `drugs/alfentanil.py`, which imports a non-existent `.base`. Optionally re-add Maitre on the base class if the parameters are at hand. Otherwise list it as a TODO in the README.
