@@ -106,6 +106,7 @@ class Prediction(NamedTuple):
     cp: FloatArray
     ce: FloatArray | None
     states: FloatArray  # (n_times, n_states), amounts + optional Ce
+    effect: FloatArray | None = None  # pd(ce), for models that define a PD
 
 
 class LinearPKModel:
@@ -117,7 +118,8 @@ class LinearPKModel:
     ``covars`` (via :meth:`_set_covariates`) and ``pk``. Models with thetas,
     PD values or derived covariates also set ``parameters`` (a drug-specific
     ``Parameters`` NamedTuple, declared in the subclass as
-    ``parameters: Parameters``).
+    ``parameters: Parameters``). Models with a PD override :meth:`pd`, and
+    :meth:`simulate` then fills ``Prediction.effect``.
     """
 
     units: ClassVar[Units]
@@ -163,6 +165,10 @@ class LinearPKModel:
     def lag(self) -> float:
         return 0.0
 
+    def pd(self, ce: FloatArray) -> FloatArray | None:
+        """Effect as a function of Ce. ``None`` when the model has no PD."""
+        return None
+
     def steady_state(self) -> FloatArray:
         """State with no infusion: ``-S⁻¹f`` (zeros when there is no forcing)."""
         f = self.forcing
@@ -206,7 +212,8 @@ class LinearPKModel:
         )
         cp = states[:, 0] / self.pk.V1
         ce = states[:, -1] if self.pk.has_effect_site else None
-        return Prediction(t, cp, ce, states)
+        effect = None if ce is None else self.pd(ce)
+        return Prediction(t, cp, ce, states, effect)
 
     def with_parameters(self, **kw: float):
         """Copy of the model with some ``pk`` fields replaced."""

@@ -109,7 +109,7 @@ Port `/home/jaj/devel/pmxmc/src/pmxmc/advan/eig.py` to numpy:
   - `_set_covariates(covars, Covariates)` builds the NamedTuple, uses `utils.filter_valid` (already moved in step 0) and warns outside `covariate_ranges`.
 - Tests: `PKParameters` micro constants, matrix shape for 1/2/3 comp ± effect site, and `ode` vs `system_matrix` consistency.
 
-### 3. Migrate the NamedTuple-style models — DONE
+### 3. Migrate the NamedTuple-style models — DONE (949259d)
 **Outcome / deviations** (the original spec follows below):
 - Migrated: Eleveld/Schnider propofol, Eleveld/Minto remifentanil, Hannivoort/Dyck dexmedetomidine, Grassin-Delyle TXA, Allegaert paracetamol, Zomorodi midazolam, Kuipers lidocaine. Marsh/Kataria/Paedfusor are untouched in `propofol.py` (step 5) and still use its `Covariates` (which now also feeds Eleveld/Schnider).
 - `parameters` is **no longer declared on the base** (ty rejects narrowing a mutable attribute). Subclasses that have one declare `parameters: Parameters`: it holds only thetas/refs/PD and derived covariates (Eleveld propofol `ce50`/`bis_delay`, Hannivoort `ce50`, Kuipers `QI`, Zomorodi `BSA`). PK values and micro constants live only in `m.pk`. Dyck, Minto, Schnider and Eleveld remifentanil have no `parameters`.
@@ -134,7 +134,17 @@ Pattern for each drug:
   - The eigen check becomes `m.simulate(...)` vs `solve_ivp(m.ode)`, with no last-mode dropping.
   - All published-value checks (Cmax, t½, Css …) must still pass unchanged.
 
-### 4. Noradrenaline on the base class (`drugs/noradrenaline.py`)
+### 4. Noradrenaline on the base class (`drugs/noradrenaline.py`) — DONE
+**Outcome / deviations** (the original spec follows below):
+- Population values are a `Thetas` NamedTuple (`Noradrenaline.thetas`, ClassVar, 70 kg reference). `parameters` is a `Parameters` NamedTuple of **individual** non-PK values only: `EPROD` (weight-scaled), `E0, EC50, EMAX, GAMMA, PKLAG, PDLAG`. The PK values (V1, V2, CL, Q→Q2, KE0→ke0) live only in `m.pk`, as in step 3.
+- Own `Covariates(weight=70)`. A missing weight now falls back to 70 kg (the old code raised KeyError). No `covariate_ranges` (none documented).
+- Base: `Prediction.effect` (default None) and a `pd(ce)` hook on `LinearPKModel` that returns None. `simulate` fills `effect = pd(ce)` when there is an effect site.
+- `Noradrenaline.with_parameters` overrides the base one. It accepts `pk` fields **and** `Parameters` fields (e.g. `EPROD`, `PKLAG`), and raises ValueError for unknown names. This replaces `copy_with(params=...)`. `pd(ce, E0=None)` keeps the optional E0 override.
+- Units: nmol, L, min, nmol/L, MAP mmHg (from the 0.261 nmol/min = 5 µg/h note in the old file).
+- `generate.compute_noradrenaline` still uses the old API (it can no longer run). It is typed `m: Any` so ty stays clean. `test_golden.py` has `noradrenaline_adapter`.
+- `tests/test_noradrenaline.py` checks: structure and allometric scaling, the endogenous steady state (Cp = EPROD/CL, MAP at baseline), `simulate` vs `solve_ivp(m.ode)` with lag, the exact lag shift, the infusion response (Css, MAP rise and washout), `with_parameters` and `repr`.
+
+**Original spec:**
 - Replace `_thetas` with a `Parameters` NamedTuple: `CL, Q, V1, V2` map to `pk` (Q → Q2), plus `EPROD, E0, EC50, EMAX, GAMMA, PKLAG, PDLAG`. Keep the allometric scaling, including ke0·(wt/70)^0.25.
 - `forcing = [EPROD, 0, 0]`, `lag = PKLAG + PDLAG`. The default y0 is `steady_state()`, which reproduces the current `EPROD/CL·V` init.
 - `pd(ce)` is the Emax/Hill model. `simulate` adds a `map` (effect) field when the model defines `pd`. The base `Prediction` gets an optional `effect` field.

@@ -513,7 +513,8 @@ NORADRENALINE_PARAMS = (
 
 
 def compute_noradrenaline(meta: dict[str, Any]) -> dict[str, Any]:
-    m = Noradrenaline(meta["covars"] or None)
+    # Pre-refactor API (dict params, get_state), removed in plan step 4.
+    m: Any = Noradrenaline(meta["covars"] or None)
     p = m.params
     lag = p["PKLAG"] + p["PDLAG"]
     load, maint = RATES["Noradrenaline"]

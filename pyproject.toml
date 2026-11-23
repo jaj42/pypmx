@@ -42,6 +42,5 @@ root = ["src", "tests"]
 exclude = [
     "src/pypmx/drugs/alfentanil.py",
     "src/pypmx/drugs/cefazolin.py",
-    "src/pypmx/drugs/noradrenaline_old.py",
     "src/pypmx/drugs/sufentanil.py",
 ]

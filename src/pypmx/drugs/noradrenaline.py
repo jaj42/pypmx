@@ -1,149 +1,119 @@
-from collections.abc import Callable
+"""Noradrenaline (norepinephrine) PK/PD model.
+
+2-compartment PK with endogenous production, an infusion lag and an effect
+site driving mean arterial pressure through a sigmoid Emax model.
+
+Units: weight (kg), time (min), amounts (nmol), volumes (L), clearances
+(L/min), concentrations (nmol/L), MAP (mmHg). For reference, 5 µg/h of
+noradrenaline is 0.261 nmol/min (5.911 nmol/µg).
+"""
+
+from __future__ import annotations
+
+import copy
+from collections.abc import Mapping
+from typing import Any, ClassVar, NamedTuple
 
 import numpy as np
-from numpy.typing import NDArray
-from scipy.integrate import solve_ivp
+from numpy.typing import ArrayLike
 
-from pypmx.utils import ConcentrationFunction
-
-# # 5 ug/h = <Quantity(0.261015371, 'nanomole / minute')>
-# df["Babynoradrenaline-rate"] *= 0.261015371
-
-# <Quantity(5.91086417, 'nanomole / microgram')>
+from pypmx.pk import FloatArray, LinearPKModel, PKParameters, Units
 
 
-class Noradrenaline:
-    _thetas = {
-        "V1": 1.08,
-        "V2": 1.39,
-        "CL": 1.49,
-        "Q": 0.319,
-        "EPROD": 1.36,
-        "E0": 55.8,
-        "EC50": 54.2,
-        "KE0": 1.29,
-        "GAMMA": 1.34,
-        "EMAX": 200,
-        "PKLAG": 0.546,
-        "PDLAG": -0.188,
-    }
-    ode_info = {"ndim": 3}
+class Covariates(NamedTuple):
+    weight: float = 70
 
-    def __init__(
-        self,
-        covars: dict[str, float] | None = None,
-        t0: float = 0,
-        y0: list[float] | None = None,
-        rate: float | ConcentrationFunction = 0.0,
-        params: dict[str, float] | None = None,
-    ) -> None:
-        self._t0 = t0
-        self._covars = covars
-        if isinstance(rate, Callable):
-            self._rate = rate
-        else:
-            self._rate = lambda _: rate
-        self.calculate_parameters()
-        self.update_parameters(params)
-        if y0 is None:
-            p = self.params
-            endo = p["EPROD"] / p["CL"]
-            self._y0 = np.full(self.ode_info["ndim"], endo)
-            self._y0[0] *= p["V1"]
-            self._y0[1] *= p["V2"]
-        else:
-            self._y0 = np.array(y0)
 
-    def calculate_parameters(self):
-        weightref = 70
-        if self._covars is not None:
-            weight = self._covars["weight"]
-        else:
-            weight = 70
+class Noradrenaline(LinearPKModel):
+    """2 compartment noradrenaline PK/PD model with endogenous production.
 
-        def scale(i):
-            return (weight / weightref) ** i
+    ``A1' = r(t - lag) + EPROD - (k10 + k12)·A1 + k21·A2`` with
+    ``lag = PKLAG + PDLAG``; without infusion the state sits at the
+    endogenous steady state ``Cp = EPROD/CL``. ``MAP = pd(Ce)``.
 
-        p = self._thetas.copy()
-        p["V1"] *= scale(1)
-        p["V2"] *= scale(1)
-        p["CL"] *= scale(0.75)
-        p["Q"] *= scale(0.75)
-        p["EPROD"] *= scale(0.75)
-        p["KE0"] *= scale(0.25)
-        self.params = p
+    All parameters are scaled allometrically to ``weight`` (reference 70 kg):
+    volumes ^1, CL/Q/EPROD ^0.75, ke0 ^0.25.
+    """
 
-    def update_parameters(self, params: dict[str, float] | None = None):
-        if params is not None:
-            self.params.update(params)
-        p = self.params
-        self.params["K10"] = p["CL"] / p["V1"]
-        self.params["K12"] = p["Q"] / p["V1"]
-        self.params["K21"] = p["Q"] / p["V2"]
+    units: ClassVar[Units] = Units(time="min", cp="nmol/l", effect="MAP (mmHg)")
 
-    def get_state(self):
-        return self._y0
+    class Thetas(NamedTuple):
+        """Typical values for a 70 kg patient."""
 
-    def get_param(self, param):
-        return self.params[param]
+        V1: float = 1.08
+        V2: float = 1.39
+        CL: float = 1.49
+        Q: float = 0.319
+        EPROD: float = 1.36
+        KE0: float = 1.29
+        E0: float = 55.8
+        EC50: float = 54.2
+        EMAX: float = 200
+        GAMMA: float = 1.34
+        PKLAG: float = 0.546
+        PDLAG: float = -0.188
+        weight_ref: float = 70
 
-    def ode(self, t, y, rate_func):
-        A1, A2, Ce = y
-        p = self.params
-        Tlag = p["PKLAG"] + p["PDLAG"]
-        ddt_A1 = (
-            A2 * p["K21"]
-            - A1 * (p["K10"] + p["K12"])
-            + p["EPROD"]
-            + rate_func(t - Tlag)
+    class Parameters(NamedTuple):
+        """Individual non-PK parameters (EPROD is weight-scaled)."""
+
+        EPROD: float
+        E0: float
+        EC50: float
+        EMAX: float
+        GAMMA: float
+        PKLAG: float
+        PDLAG: float
+
+    thetas: ClassVar[Thetas] = Thetas()
+    parameters: Parameters
+
+    def __init__(self, covars: Mapping[str, Any] | None = None):
+        c = self._set_covariates(covars, Covariates)
+        th = self.thetas
+
+        def scale(exponent: float) -> float:
+            return (c.weight / th.weight_ref) ** exponent
+
+        self.pk = PKParameters(
+            V1=th.V1 * scale(1),
+            V2=th.V2 * scale(1),
+            CL=th.CL * scale(0.75),
+            Q2=th.Q * scale(0.75),
+            ke0=th.KE0 * scale(0.25),
         )
-        ddt_A2 = A1 * p["K12"] - A2 * p["K21"]
-        ddt_Ce = p["KE0"] * (A1 / p["V1"] - Ce)
-        return ddt_A1, ddt_A2, ddt_Ce
-
-    def solve_ode(
-        self, t: NDArray, y0: list[float] | None = None
-    ) -> tuple[NDArray, NDArray, NDArray]:
-        if y0 is None:
-            y0 = list(self.get_state())
-        t = np.array(t)
-        t_span = [min(t), max(t)]
-        res = solve_ivp(
-            self.ode,
-            t_span=t_span,
-            t_eval=t,
-            y0=y0,
-            args=(self._rate,),
-            # max_step=0.1,
-            dense_output=True,
+        self.parameters = self.Parameters(
+            EPROD=th.EPROD * scale(0.75),
+            E0=th.E0,
+            EC50=th.EC50,
+            EMAX=th.EMAX,
+            GAMMA=th.GAMMA,
+            PKLAG=th.PKLAG,
+            PDLAG=th.PDLAG,
         )
-        return res.t, res.y[0, :], res.y[2, :]
 
-    def pd(self, Ce: NDArray, E0: float | None = None) -> NDArray:
-        if E0 is None:
-            E0 = self.params["E0"]
-        gamma = self.params["GAMMA"]
-        Emax = self.params["EMAX"]
-        EC50 = self.params["EC50"]
-        return E0 + Emax * Ce**gamma / (EC50**gamma + Ce**gamma)
+    @property
+    def forcing(self) -> FloatArray:
+        f = np.zeros(self.n_states)
+        f[0] = self.parameters.EPROD
+        return f
 
-    def __call__(self, t: NDArray) -> tuple[NDArray, NDArray, NDArray, NDArray]:
-        ode_t, A1, Ce = self.solve_ode(t)
-        Cp = A1 / self.params["V1"]
-        MAP = self.pd(Ce)
-        return ode_t, Cp, Ce, MAP
+    @property
+    def lag(self) -> float:
+        return self.parameters.PKLAG + self.parameters.PDLAG
 
-    def copy_with(
-        self,
-        t0: float | None = None,
-        y0: list[float] | None = None,
-        rate: float | ConcentrationFunction = 0.0,
-        params: dict[str, float] | None = None,
-    ):
-        if t0 is None:
-            t0 = self._t0
-        if rate is None:
-            rate = self._rate
-        if params is None:
-            params = self.params.copy()
-        return Noradrenaline(self._covars, t0, y0, rate, params)
+    def pd(self, ce: ArrayLike, E0: float | None = None) -> FloatArray:
+        """MAP (mmHg) from Ce: sigmoid Emax on top of ``E0``."""
+        p = self.parameters
+        e0 = p.E0 if E0 is None else E0
+        ce_g = np.asarray(ce, dtype=float) ** p.GAMMA
+        return e0 + p.EMAX * ce_g / (p.EC50**p.GAMMA + ce_g)
+
+    def with_parameters(self, **kw: float):
+        """Copy with some ``pk`` and/or ``parameters`` fields replaced."""
+        pk_kw = {k: v for k, v in kw.items() if k in PKParameters._fields}
+        other = {k: v for k, v in kw.items() if k not in pk_kw}
+        new = copy.copy(self)
+        new.pk = self.pk._replace(**pk_kw)
+        new.parameters = self.parameters._replace(**other)
+        return new

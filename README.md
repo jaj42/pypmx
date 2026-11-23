@@ -26,7 +26,7 @@ All models are exported from `pypmx.drugs`. Time is in minutes.
 | Propofol + remifentanil (haemodynamics) | `SuPropofolRemifentanilHemodynamics`, `SuPropofolRemifentanilHemodynamicsVariant` | Su et al. |
 | Sufentanil | `GeptsSufentanil` | Gepts et al. Anesthesiology 1995;83:1194 |
 | Dexmedetomidine | `HannivoortDexmedetomidine`, `DyckDexmedetomidine` | Hannivoort et al.; Dyck et al. |
-| Noradrenaline | `Noradrenaline` | |
+| Noradrenaline | `Noradrenaline` | 2-compartment with endogenous production, lag and MAP Emax PD (`simulate(...).effect`) |
 | Cefazolin | `Cefazolin` | Sci Rep 2021;11:19763 |
 | Tranexamic acid | `GrassinDelyleTranexamicAcid` | Grassin-Delyle et al. BJA 2022;128:465 (2-compartment, IV only) |
 | Paracetamol | `AllegaertParacetamol` | Allegaert et al. BMC Anesthesiol 2014;14:77 (3-compartment; pregnancy / surgery / ICU settings) |

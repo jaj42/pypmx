@@ -29,6 +29,7 @@ from pypmx.drugs import (
     GrassinDelyleTranexamicAcid,
     HannivoortDexmedetomidine,
     KuipersLidocaine,
+    Noradrenaline,
     ZomorodiMidazolam,
 )
 from pypmx.drugs.propofol import Schnider
@@ -73,7 +74,29 @@ def linear_pk_adapter(
     return compute
 
 
+# snapshot name -> new-API name (pk field or Noradrenaline.Parameters field)
+NORADRENALINE_NAMES = {"Q": "Q2", "KE0": "ke0"}
+
+
+def noradrenaline_adapter(meta: dict[str, Any]) -> dict[str, Any]:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        m = Noradrenaline(meta["covars"] or None)
+    values = m.pk._asdict() | m.parameters._asdict()
+    names = generate.NORADRENALINE_PARAMS
+    pred = m.simulate(meta["infu_time"], meta["infu_rate"], generate.TIME)
+    return {
+        "params": {n: float(values[NORADRENALINE_NAMES.get(n, n)]) for n in names},
+        "eigenvalues": np.sort(np.linalg.eigvals(m.system_matrix).real),
+        "cp": pred.cp,
+        "ce": pred.ce,
+        "effect": pred.effect,
+    }
+
+
 ADAPTERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    "Noradrenaline": noradrenaline_adapter,
+} | {
     name: linear_pk_adapter(cls)
     for name, cls in {
         "EleveldPropofol": EleveldPropofol,
