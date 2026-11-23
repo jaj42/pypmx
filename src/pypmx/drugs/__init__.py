@@ -11,6 +11,7 @@ from .propofol_remifentanil.su_variant import (
     PropofolRemifentanil as SuPropofolRemifentanilHemodynamicsVariant,
 )
 from .sufentanil import Sufentanil as GeptsSufentanil
+from .tranexamic_acid import GrassinDelyle as GrassinDelyleTranexamicAcid
 
 all = [
     Cefazolin,
@@ -18,6 +19,7 @@ all = [
     HannivoortDexmedetomidine,
     EleveldPropofol,
     GeptsSufentanil,
+    GrassinDelyleTranexamicAcid,
     Noradrenaline,
     SuPropofolHemodynamics,
     SuPropofolRemifentanilHemodynamics,

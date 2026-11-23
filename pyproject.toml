@@ -25,3 +25,8 @@ project-includes = [
     "**/*.py*",
     "**/*.ipynb",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
