@@ -219,6 +219,7 @@ Pattern for each drug:
   - A NONMEM-style event loop chains `*IVInfusion.advance` over a loading + maintenance + washout regimen for Eleveld propofol, Dyck dexmedetomidine (3 comp), Grassin-Delyle TXA (2 comp) and a 1-comp `PKParameters`. The amounts match `eig_advan` on `pk.system_matrix`, and Cp matches `LinearPKModel.simulate`.
   - **Bug fixed:** `ThreeCompartmentOral` Eq. 38 (first peripheral, `X3_A1`) was missing its λ2 term, so X3 was ~15% off. All other closed forms already matched to ~1e-15. There is a regression test for it.
   - The paper's `I` helper names keep `# noqa: E741`, so `ruff check src tests` is now clean.
+- **Golden generators removed.** `tests/golden/generate.py` and `generate_tci.py` used the old API and could no longer run. The live part of `generate.py` moved into `test_golden.py`: the time grid, `to_arrays`, the Noradrenaline parameter names, and the Su PD runner, which is now `su_adapter`. Every model key now has an adapter, so there is no more fallback to the generator. `test_snapshots_present` checks the 60 files, that each file name matches its `meta`, and that each model has an adapter. To regenerate a snapshot on purpose, check out `61a8a78` or earlier (pre-refactor code: `f9301d7`).
 
 ## Critical files
 `src/pypmx/eigen.py`, `src/pypmx/pk.py` (new), `src/pypmx/utils.py`, `src/pypmx/tci.py`, `src/pypmx/drugs/*.py`, `src/pypmx/drugs/__init__.py`, `tests/*`. Delete `standard_models.py`, `ode.py`, `drugs/noradrenaline_old.py` and `drugs/alfentanil.py`.
