@@ -164,7 +164,7 @@ class ThreeCompartmentIVBolus:
         # Helper terms (Eq. 21)
         B = A2 * k21 + A3 * k31
         C = A2 * k21 * E3 + A3 * k31 * E2
-        I = A1 * k12 * E3 - A2 * k13 * k31 + A3 * k31 * k12
+        I = A1 * k12 * E3 - A2 * k13 * k31 + A3 * k31 * k12  # noqa: E741
         J = A1 * k13 * E2 - A3 * k12 * k21 + A2 * k13 * k21
 
         # Central compartment (Eq. 18)
@@ -236,7 +236,7 @@ class ThreeCompartmentIVInfusion:
         # Helper terms
         B = A2 * k21 + A3 * k31
         C = A2 * k21 * E3 + A3 * k31 * E2
-        I = A1 * k12 * E3 - A2 * k13 * k31 + A3 * k31 * k12
+        I = A1 * k12 * E3 - A2 * k13 * k31 + A3 * k31 * k12  # noqa: E741
         J = A1 * k13 * E2 - A3 * k12 * k21 + A2 * k13 * k21
 
         # Central compartment (Eq. 29)
@@ -414,7 +414,7 @@ class ThreeCompartmentOral:
         # Helper terms (modified Eq. 40 for oral)
         B = A3 * k32 + A4 * k42
         C = A3 * k32 * E4 + A4 * k42 * E3
-        I = A2 * k23 * E4 - A3 * k24 * k42 + A4 * k42 * k23
+        I = A2 * k23 * E4 - A3 * k24 * k42 + A4 * k42 * k23  # noqa: E741
         J = A2 * k24 * E3 - A4 * k23 * k32 + A3 * k24 * k32
 
         # Absorption compartment (Eq. 32)
@@ -466,6 +466,7 @@ class ThreeCompartmentOral:
             * (
                 (E4 - ka) / ((l1 - ka) * (l2 - ka) * (l3 - ka)) * np.exp(-ka * t)
                 + (E4 - l1) / ((ka - l1) * (l2 - l1) * (l3 - l1)) * np.exp(-l1 * t)
+                + (E4 - l2) / ((ka - l2) * (l1 - l2) * (l3 - l2)) * np.exp(-l2 * t)
                 + (E4 - l3) / ((ka - l3) * (l1 - l3) * (l2 - l3)) * np.exp(-l3 * t)
             )
         )

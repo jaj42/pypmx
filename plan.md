@@ -213,7 +213,12 @@ Pattern for each drug:
   - `continuize_order_one` now returns `utils.ConcentrationFunction`. That Protocol is the only copy: `su_variant.py` imports it, and the three Su models type their `Cp`/`Cp_prop`/`Cp_remi` arguments with it (was `Callable[[float], float]`). The Su models' behaviour is unchanged; they accept any callable as before.
   - Usage: `SuPropofolHemodynamics(EleveldPropofol(c).simulate(ti, r, t).cp_function())`. The interpolation accuracy depends on the grid: with a 0.5-min grid the error is ~14% during a 2-min loading infusion and <1% from 5 min on.
   - Golden snapshots unchanged. `tests/test_pd_coupling.py` checks the interpolation (grid points, midpoint, left/right), `ce_function` without an effect site, the accuracy vs a fine exact solution, and all three Su models driven by Eleveld propofol / Minto remifentanil predictions (same result as a hand-built interpolant, finite and positive outputs, MAP drop).
-- **Cross-check.** Check `advan/pk_advan.py` against `eig_advan` in tests, as a second independent solver.
+- **Cross-check — DONE.**
+  - New `tests/test_pk_advan.py` checks every ADVAN closed form (1/2/3 comp × IV bolus, IV infusion, oral) against `eig_advan` at 1e-10. It uses random rate constants that include peripheral elimination (k20/k30) and non-zero initial amounts in every compartment. Oral models get a depot state in front of the disposition matrix.
+  - `calculate_lambda` is checked against the eigenvalues of K (zeros for the unused compartments).
+  - A NONMEM-style event loop chains `*IVInfusion.advance` over a loading + maintenance + washout regimen for Eleveld propofol, Dyck dexmedetomidine (3 comp), Grassin-Delyle TXA (2 comp) and a 1-comp `PKParameters`. The amounts match `eig_advan` on `pk.system_matrix`, and Cp matches `LinearPKModel.simulate`.
+  - **Bug fixed:** `ThreeCompartmentOral` Eq. 38 (first peripheral, `X3_A1`) was missing its λ2 term, so X3 was ~15% off. All other closed forms already matched to ~1e-15. There is a regression test for it.
+  - The paper's `I` helper names keep `# noqa: E741`, so `ruff check src tests` is now clean.
 
 ## Critical files
 `src/pypmx/eigen.py`, `src/pypmx/pk.py` (new), `src/pypmx/utils.py`, `src/pypmx/tci.py`, `src/pypmx/drugs/*.py`, `src/pypmx/drugs/__init__.py`, `tests/*`. Delete `standard_models.py`, `ode.py`, `drugs/noradrenaline_old.py` and `drugs/alfentanil.py`.
