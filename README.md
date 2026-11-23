@@ -9,11 +9,29 @@
 
 ## Features
 
-- **Comprehensive drug models**: Propofol, Remifentanil, Noradrenaline, Sufentanil, and more
-- **Standard PK/PD models**: 3-compartment models, effect-site equilibration
+- **Comprehensive drug models**: Propofol, Remifentanil, Noradrenaline, Sufentanil, and more (see below)
+- **Standard PK/PD models**: 2- and 3-compartment models, effect-site equilibration
 - **Physiological calculations**: Lean body mass, covariate adjustments
 - **Numerical solvers**: ODE integration for drug concentration simulations
 - **Clinical utilities**: Infusion rate calculations, piecewise rate functions
+
+## Drug models
+
+All models are exported from `pypmx.drugs`. Time is in minutes.
+
+| Drug | Class | Source |
+|---|---|---|
+| Propofol | `EleveldPropofol` | Eleveld et al. |
+| Propofol (haemodynamics) | `SuPropofolHemodynamics` | Su et al. |
+| Propofol + remifentanil (haemodynamics) | `SuPropofolRemifentanilHemodynamics`, `SuPropofolRemifentanilHemodynamicsVariant` | Su et al. |
+| Sufentanil | `GeptsSufentanil` | Gepts et al. Anesthesiology 1995;83:1194 |
+| Dexmedetomidine | `HannivoortDexmedetomidine`, `DyckDexmedetomidine` | Hannivoort et al.; Dyck et al. |
+| Noradrenaline | `Noradrenaline` | |
+| Cefazolin | `Cefazolin` | Sci Rep 2021;11:19763 |
+| Tranexamic acid | `GrassinDelyleTranexamicAcid` | Grassin-Delyle et al. BJA 2022;128:465 (2-compartment, IV only) |
+| Paracetamol | `AllegaertParacetamol` | Allegaert et al. BMC Anesthesiol 2014;14:77 (3-compartment; pregnancy / surgery / ICU settings) |
+| Midazolam | `ZomorodiMidazolam` | Zomorodi et al. Anesthesiology 1998;89:1418 (3-compartment; simple or BSA-adjusted) |
+| Lidocaine | `KuipersLidocaine` | Kuipers et al. Anesthesiology 2001;94:566 (3-compartment; models A–D, cardiac-output covariate) |
 
 ## Contributing
 
