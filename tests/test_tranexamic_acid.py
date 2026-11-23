@@ -8,6 +8,14 @@ from pypmx import eigen
 from pypmx.drugs import GrassinDelyleTranexamicAcid as Model
 
 
+def _unit_bolus(m):
+    """Input vector of a unit bolus into the central compartment (concentration
+    space: the bolus raises C1 by 1/V1)."""
+    B = np.zeros(m.system_matrix.shape[0])
+    B[0] = 1 / m.parameters.V1
+    return B
+
+
 def simulate(model, inf, t_end, dt=0.1):
     t = np.arange(0, t_end + dt, dt)
     sol = solve_ivp(
@@ -56,11 +64,9 @@ def test_warnings_outside_studied_range():
 def test_ode_bolus_matches_eigen_impulse_response():
     m = Model({"weight": 64.2})
     p = m.parameters
-    lambdas, coefs = eigen.eigendecomposition(m.system_matrix, p.V1, p.ke0)
-    # ke0 = 0 gives a zero eigenvalue (last, after reordering); its coefficients
-    # are 0/0 = nan and irrelevant for Cp, so keep only the PK modes.
+    modes = eigen.eigendecomposition(m.system_matrix, _unit_bolus(m))
     t = np.linspace(0, 600, 601)
-    cp_eigen = eigen.calculate_impulse_response(lambdas[:-1], coefs[0, :-1], t)
+    cp_eigen = eigen.calculate_impulse_response(modes, t)
 
     sol = solve_ivp(
         m.ode,

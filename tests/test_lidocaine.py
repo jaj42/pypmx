@@ -21,6 +21,14 @@ TABLE2 = {
 }
 
 
+def _unit_bolus(m):
+    """Input vector of a unit bolus into the central compartment (concentration
+    space: the bolus raises C1 by 1/V1)."""
+    B = np.zeros(m.system_matrix.shape[0])
+    B[0] = 1 / m.parameters.V1
+    return B
+
+
 @pytest.mark.parametrize(
     "covars",
     [
@@ -98,10 +106,9 @@ def test_ode_bolus_matches_eigen_impulse_response(model):
         {"age": 60, "weight": 85, "height": 180, "cardiac_output": 4.5}, model=model
     )
     p = m.parameters
-    lambdas, coefs = eigen.eigendecomposition(m.system_matrix, p.V1, p.ke0)
-    # ke0 = 0 gives a zero eigenvalue (last); its coefficients are nan, drop it.
+    modes = eigen.eigendecomposition(m.system_matrix, _unit_bolus(m))
     t = np.linspace(0, 720, 1441)
-    cp_eigen = eigen.calculate_impulse_response(lambdas[:-1], coefs[0, :-1], t)
+    cp_eigen = eigen.calculate_impulse_response(modes, t)
     sol = solve_ivp(
         m.ode,
         (0, 720),
@@ -169,9 +176,9 @@ def test_bolus_1mg_per_kg():
     """1 mg/kg (75 mg) bolus: blood levels fall to sub-therapeutic within an hour
     and to tens of ng/ml by 6 h (assay range 11.7-1404 ng/ml after the peak)."""
     m = Model()
-    lambdas, coefs = eigen.eigendecomposition(m.system_matrix, m.parameters.V1, 0)
+    modes = eigen.eigendecomposition(m.system_matrix, _unit_bolus(m))
     t = np.array([2.0, 10, 60, 360])
-    cp = 75 * eigen.calculate_impulse_response(lambdas[:-1], coefs[0, :-1], t)
+    cp = 75 * eigen.calculate_impulse_response(modes, t)
     assert np.all(np.diff(cp) < 0)
     assert 1.0 < cp[1] < 5.0
     assert 0.2 < cp[2] < 1.0

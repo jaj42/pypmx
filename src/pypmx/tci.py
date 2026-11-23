@@ -5,6 +5,8 @@ from collections import namedtuple
 import numpy as np
 from numpy.typing import NDArray
 
+from pypmx.eigen import Modes
+
 FloatArray = NDArray[np.float64]
 
 UDFs = namedtuple("UDFs", ["p_udf", "e_udf"])
@@ -49,6 +51,24 @@ class Parameters:
         else:
             raise ValueError(f"Unsupported time unit: {self.time_unit}")
         return result
+
+
+def stanpump_order(modes: Modes, ke0: float) -> Modes:
+    """Reorder modes STANPUMP-style: PK modes (fastest first), then ke0 last.
+
+    The ke0 mode is the one whose decay constant is closest to ``ke0``.
+    """
+    lambdas = modes.lambdas
+    ke0_idx = int(np.argmin(np.abs(lambdas - ke0)))
+    pk_idx = [i for i in np.argsort(-lambdas.real) if i != ke0_idx]
+    order = np.array([*pk_idx, ke0_idx])
+    return Modes(
+        lambdas[order],
+        modes.eigvecs[:, order],
+        modes.alpha_B[order],
+        modes.alpha_f[order],
+        modes.y0_mod[:, order],
+    )
 
 
 def calculate_lambdas(parameters):

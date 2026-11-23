@@ -11,6 +11,14 @@ from pypmx.leanbodymass import janmahasation
 PK_NAMES = ("V1", "V2", "V3", "Q2", "Q3", "CL", "k12", "k21", "k13", "k31", "k10")
 
 
+def _unit_bolus(m):
+    """Input vector of a unit bolus into the central compartment (concentration
+    space: the bolus raises C1 by 1/V1)."""
+    B = np.zeros(m.system_matrix.shape[0])
+    B[0] = 1 / m.parameters.V1
+    return B
+
+
 def simulate_q6h(model, t_end, dose=1000, tau=360, t_inf=15, dt=0.1):
     def inf(t):
         return dose / t_inf if (t % tau) < t_inf else 0.0
@@ -112,10 +120,9 @@ def test_warnings():
 def test_ode_bolus_matches_eigen_impulse_response():
     m = Model({"age": 68, "weight": 80, "height": 180}, setting="icu")
     p = m.parameters
-    lambdas, coefs = eigen.eigendecomposition(m.system_matrix, p.V1, p.ke0)
-    # ke0 = 0 gives a zero eigenvalue (last); its coefficients are nan, drop it.
+    modes = eigen.eigendecomposition(m.system_matrix, _unit_bolus(m))
     t = np.linspace(0, 1440, 1441)
-    cp_eigen = eigen.calculate_impulse_response(lambdas[:-1], coefs[0, :-1], t)
+    cp_eigen = eigen.calculate_impulse_response(modes, t)
     sol = solve_ivp(
         m.ode,
         (0, 1440),

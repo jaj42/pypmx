@@ -68,6 +68,20 @@ def continuize_order_zero(infu_time, infu_rate, r0: float = 0):
     return run
 
 
+def rate_at(t: Any, infu_time: Any, infu_rate: Any) -> NDArray[np.float64]:
+    """Piecewise-constant infusion rate at time(s) ``t`` (vectorised).
+
+    ``infu_rate[i]`` applies from ``infu_time[i]`` on, the last rate persists
+    and the rate is 0 before ``infu_time[0]``.
+    """
+    t = np.asarray(t, dtype=float)
+    infu_time = np.asarray(infu_time, dtype=float).ravel()
+    infu_rate = np.asarray(infu_rate, dtype=float).ravel()
+    idx = np.searchsorted(infu_time[1:], t, side="right")
+    idx = np.clip(idx, 0, len(infu_rate) - 1)
+    return np.where(t < infu_time[0], 0.0, infu_rate[idx])
+
+
 def value_change_indices(data: NDArray):
     data = np.array(data)
     ddata = np.diff(data, prepend=data[0], append=data[-1])

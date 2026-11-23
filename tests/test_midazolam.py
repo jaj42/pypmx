@@ -11,6 +11,14 @@ from pypmx.leanbodymass import dubois
 PK_NAMES = ("V1", "V2", "V3", "CL", "Q2", "Q3", "k12", "k21", "k13", "k31", "k10")
 
 
+def _unit_bolus(m):
+    """Input vector of a unit bolus into the central compartment (concentration
+    space: the bolus raises C1 by 1/V1)."""
+    B = np.zeros(m.system_matrix.shape[0])
+    B[0] = 1 / m.parameters.V1
+    return B
+
+
 @pytest.mark.parametrize(
     "covars",
     [
@@ -77,10 +85,9 @@ def test_warnings():
 def test_ode_bolus_matches_eigen_impulse_response(bsa_adjusted):
     m = Model({"weight": 95, "height": 182}, bsa_adjusted=bsa_adjusted)
     p = m.parameters
-    lambdas, coefs = eigen.eigendecomposition(m.system_matrix, p.V1, p.ke0)
-    # ke0 = 0 gives a zero eigenvalue (last); its coefficients are nan, drop it.
+    modes = eigen.eigendecomposition(m.system_matrix, _unit_bolus(m))
     t = np.linspace(0, 2880, 2881)
-    cp_eigen = eigen.calculate_impulse_response(lambdas[:-1], coefs[0, :-1], t)
+    cp_eigen = eigen.calculate_impulse_response(modes, t)
     sol = solve_ivp(
         m.ode,
         (0, 2880),
@@ -97,8 +104,8 @@ def test_ode_bolus_matches_eigen_impulse_response(bsa_adjusted):
 def test_terminal_half_life_15h():
     """Abstract: calculated elimination half-life 15 h (Table 3: 905 min)."""
     m = Model()
-    lambdas, _ = eigen.eigendecomposition(m.system_matrix, m.parameters.V1, 0)
-    rates = sorted(np.real(lambdas[:-1]))  # positive decay constants
+    lambdas = eigen.eigendecomposition(m.system_matrix, _unit_bolus(m)).lambdas
+    rates = sorted(lambdas[lambdas > 0])  # drop the ke0 = 0 mode
     t_half = np.log(2) / rates[0]
     assert t_half / 60 == pytest.approx(15, rel=0.03)
     assert t_half == pytest.approx(905.088, rel=0.01)
