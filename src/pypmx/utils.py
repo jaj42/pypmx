@@ -3,7 +3,7 @@ from __future__ import annotations
 from importlib import resources
 from math import nan
 from collections.abc import Mapping
-from typing import Any, Callable, NamedTuple, Protocol
+from typing import Any, NamedTuple, Protocol
 
 import numpy as np
 from numpy.typing import NDArray
@@ -45,12 +45,24 @@ def calculate_drug_dose(data, molar_mass=None):
     }
 
 
+class ConcentrationFunction(Protocol):
+    """A concentration as a function of time, e.g. Cp(t) fed to a PD model."""
+
+    def __call__(self, t: float, /) -> float: ...
+
+
 def continuize_order_one(
     times: NDArray,
     values: NDArray,
     left: float | None = nan,
     right: float | None = None,
-) -> Callable[[float], float]:
+) -> ConcentrationFunction:
+    """Linear interpolation of ``values`` sampled at ``times``.
+
+    ``left`` is returned before ``times[0]`` (default nan), ``right`` after
+    ``times[-1]`` (default: the last value).
+    """
+
     def sub_func(x):
         return np.interp(x, times, values, left, right)
 
@@ -88,10 +100,6 @@ def value_change_indices(data: NDArray):
     changes = np.flatnonzero(ddata)
     changes = np.insert(changes, 0, 0)
     return changes
-
-
-class ConcentrationFunction(Protocol):
-    def __call__(self, t: float, /) -> float: ...
 
 
 def filter_valid(

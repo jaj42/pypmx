@@ -208,7 +208,11 @@ Pattern for each drug:
     - The Eleveld remifentanil CVs and `with_eta`/`sample` (reproducibility, var(log CL) ≈ ω², the Css shift).
     - An omega over both pk and `parameters` (a Noradrenaline subclass).
     - For the Su models: zero eta equals the typical model, re-derivation, an additive eta, the `random_effects` flag with a seed, and that the class dict is not mutated.
-- **PD-only models.** The Su models should consume `Prediction.cp_function()` via `utils.continuize_order_one`, and use the single `utils.ConcentrationFunction` (it is currently duplicated in `su_variant.py`).
+- **PD-only models — DONE.**
+  - `Prediction.cp_function(left=nan, right=None)` and `ce_function(...)` return `utils.continuize_order_one(t, cp/ce)` (linear interpolation of the prediction grid; nan before the grid, last value after). `ce_function` raises ValueError when there is no effect site.
+  - `continuize_order_one` now returns `utils.ConcentrationFunction`. That Protocol is the only copy: `su_variant.py` imports it, and the three Su models type their `Cp`/`Cp_prop`/`Cp_remi` arguments with it (was `Callable[[float], float]`). The Su models' behaviour is unchanged; they accept any callable as before.
+  - Usage: `SuPropofolHemodynamics(EleveldPropofol(c).simulate(ti, r, t).cp_function())`. The interpolation accuracy depends on the grid: with a 0.5-min grid the error is ~14% during a 2-min loading infusion and <1% from 5 min on.
+  - Golden snapshots unchanged. `tests/test_pd_coupling.py` checks the interpolation (grid points, midpoint, left/right), `ce_function` without an effect site, the accuracy vs a fine exact solution, and all three Su models driven by Eleveld propofol / Minto remifentanil predictions (same result as a hand-built interpolant, finite and positive outputs, MAP drop).
 - **Cross-check.** Check `advan/pk_advan.py` against `eig_advan` in tests, as a second independent solver.
 
 ## Critical files

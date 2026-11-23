@@ -33,7 +33,7 @@ from numpy.typing import ArrayLike, NDArray
 
 from pypmx.eigen import eig_advan
 from pypmx.iiv import RandomEffects
-from pypmx.utils import filter_valid
+from pypmx.utils import ConcentrationFunction, continuize_order_one, filter_valid
 
 FloatArray = NDArray[np.float64]
 C = TypeVar("C", bound=NamedTuple)
@@ -153,6 +153,27 @@ class Prediction(NamedTuple):
     ce: FloatArray | None
     states: FloatArray  # (n_times, n_states), amounts + optional Ce
     effect: FloatArray | None = None  # pd(ce), for models that define a PD
+
+    def cp_function(
+        self, left: float | None = nan, right: float | None = None
+    ) -> ConcentrationFunction:
+        """Cp(t), linearly interpolated between the prediction times.
+
+        For a PD-only model, e.g.
+        ``SuPropofolHemodynamics(EleveldPropofol(c).simulate(...).cp_function())``.
+        The accuracy follows the time grid: use a grid fine enough to resolve
+        the infusion changes. ``left``/``right`` are returned outside the grid
+        (default nan before, the last value after).
+        """
+        return continuize_order_one(self.t, self.cp, left, right)
+
+    def ce_function(
+        self, left: float | None = nan, right: float | None = None
+    ) -> ConcentrationFunction:
+        """Ce(t), as :meth:`cp_function`. Raises if there is no effect site."""
+        if self.ce is None:
+            raise ValueError("the model has no effect site (ke0 == 0)")
+        return continuize_order_one(self.t, self.ce, left, right)
 
 
 class LinearPKModel(RandomEffects):

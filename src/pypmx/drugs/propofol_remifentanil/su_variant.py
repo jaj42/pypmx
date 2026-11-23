@@ -1,17 +1,13 @@
 from collections.abc import Mapping
 from math import exp, log, nan
-from typing import Any, ClassVar, NamedTuple, Protocol
+from typing import Any, ClassVar, NamedTuple
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.integrate import solve_ivp
 
 from pypmx.iiv import Omega, RandomEffects
-from pypmx.utils import filter_valid
-
-
-class ConcentrationFunction(Protocol):
-    def __call__(self, t: float, /) -> float: ...
+from pypmx.utils import ConcentrationFunction, filter_valid
 
 
 FloatArray = NDArray[np.floating[Any]]

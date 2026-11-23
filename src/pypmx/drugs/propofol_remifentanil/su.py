@@ -1,4 +1,4 @@
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from math import exp, log, nan
 from typing import ClassVar, NamedTuple
 
@@ -7,7 +7,7 @@ from numpy.typing import ArrayLike, NDArray
 from scipy.integrate import solve_ivp
 
 from pypmx.iiv import Omega, RandomEffects
-from pypmx.utils import filter_valid
+from pypmx.utils import ConcentrationFunction, filter_valid
 
 
 class State(NamedTuple):
@@ -133,8 +133,8 @@ class PropofolRemifentanil(RandomEffects):
 
     def __init__(
         self,
-        Cp_prop: Callable[[float], float],
-        Cp_remi: Callable[[float], float],
+        Cp_prop: ConcentrationFunction,
+        Cp_remi: ConcentrationFunction,
         covariates: dict | None = None,
         y0: State | None = None,
         random_effects: bool = False,
