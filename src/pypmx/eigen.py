@@ -38,7 +38,8 @@ def eigendecomposition(S, V1, ke0: float = None):
     assert np.allclose(S, S_reconstructed)
 
     # Initial condition for unit bolus in central compartment
-    C0 = np.array([1.0 / V1, 0.0, 0.0, 0.0])  # µg/L
+    C0 = np.zeros(S.shape[0])  # µg/L
+    C0[0] = 1.0 / V1
 
     # Modal coordinates
     alpha = np.linalg.inv(eigvecs) @ C0  # µg/L
