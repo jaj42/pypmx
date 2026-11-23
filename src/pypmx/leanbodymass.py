@@ -53,6 +53,12 @@ def bmi(height: float, weight: float) -> float:
     return weight / ((height / 100) ** 2)
 
 
+def dubois(height: float, weight: float) -> float:
+    """body surface area (m^2), height in cm, weight in kg.
+    Du Bois D, Du Bois EF. Arch Intern Med 1916;17:863-71"""
+    return 0.007184 * weight**0.425 * height**0.725
+
+
 def idealbodyweight(height: float, sex: str) -> float:
     """ideal body weight as per ARDSnet/Devine"""
     if sex == "m":

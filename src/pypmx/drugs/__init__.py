@@ -1,6 +1,7 @@
 from .cefazolin import Cefazolin
 from .dexmedetomidine import Dyck as DyckDexmedetomidine
 from .dexmedetomidine import Hannivoort as HannivoortDexmedetomidine
+from .midazolam import Zomorodi as ZomorodiMidazolam
 from .noradrenaline import Noradrenaline
 from .paracetamol import Allegaert as AllegaertParacetamol
 from .propofol import Eleveld as EleveldPropofol
@@ -26,4 +27,5 @@ all = [
     SuPropofolHemodynamics,
     SuPropofolRemifentanilHemodynamics,
     SuPropofolRemifentanilHemodynamicsVariant,
+    ZomorodiMidazolam,
 ]
