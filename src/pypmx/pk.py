@@ -130,6 +130,22 @@ class PKParameters(NamedTuple):
         return self.Q3 / self.V3 if self.Q3 else 0.0
 
 
+def system_matrix(p: PKParameters) -> FloatArray:
+    """``S`` of ``x' = S·x + B·r``: amounts, plus Ce when ``ke0 != 0``."""
+    n_cmt = p.n_cmt
+    n = n_cmt + int(p.has_effect_site)
+    S = np.zeros((n, n))
+    S[0, 0] = -(p.k10 + p.k12 + p.k13)
+    for i, (k1i, ki1) in enumerate(((p.k12, p.k21), (p.k13, p.k31))[: n_cmt - 1]):
+        S[0, i + 1] = ki1
+        S[i + 1, 0] = k1i
+        S[i + 1, i + 1] = -ki1
+    if p.has_effect_site:
+        S[-1, 0] = p.ke0 / p.V1
+        S[-1, -1] = -p.ke0
+    return S
+
+
 class Prediction(NamedTuple):
     t: FloatArray
     cp: FloatArray
@@ -166,18 +182,7 @@ class LinearPKModel:
 
     @property
     def system_matrix(self) -> FloatArray:
-        p = self.pk
-        n_cmt = p.n_cmt
-        S = np.zeros((self.n_states, self.n_states))
-        S[0, 0] = -(p.k10 + p.k12 + p.k13)
-        for i, (k1i, ki1) in enumerate(((p.k12, p.k21), (p.k13, p.k31))[: n_cmt - 1]):
-            S[0, i + 1] = ki1
-            S[i + 1, 0] = k1i
-            S[i + 1, i + 1] = -ki1
-        if p.has_effect_site:
-            S[-1, 0] = p.ke0 / p.V1
-            S[-1, -1] = -p.ke0
-        return S
+        return system_matrix(self.pk)
 
     @property
     def input_matrix(self) -> FloatArray:

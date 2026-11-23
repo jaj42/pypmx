@@ -174,7 +174,17 @@ Pattern for each drug:
 - Update `drugs/__init__.py` exports and README. Empty the ty exclude list (cefazolin, sufentanil, alfentanil). Add golden adapters for Marsh/Kataria/Paedfusor/Sufentanil/Cefazolin (snapshot V2/V3 are already Q/k-derived; Cefazolin cases are `CrCL` 0/40/80/130).
 - Tests: the shared sanity checks for each migrated model. For Marsh, the derived V2 is about 0.46·wt, which matches the original.
 
-### 6. tci.py on the unified model
+### 6. tci.py on the unified model — DONE
+**Outcome / deviations** (the original spec follows below):
+- The `Parameters` dataclass (with its `per_seconds`/`per_minutes` bug) and `calculate_lambdas`/`calculate_coefficients` are gone. `tci.decompose(model | PKParameters) -> (lambdas, Coefs)` builds `pk.system_matrix(p) / 60`, calls `eigendecomposition` and applies `stanpump_order` (no effect site: fastest first). Coefficients are `eigvec·α_B/λ` (÷V1 for Cp). The ÷60 is the only seconds conversion. A `LinearPKModel` whose `units.time` is not `"min"` raises.
+- `pk.system_matrix(p: PKParameters)` is a module-level function now; the `LinearPKModel.system_matrix` property calls it.
+- `calculate_udfs(lambdas, coefs, delta_seconds) -> (UDFs, peak_time | None)`; a new `prepare(model, delta_seconds=10) -> TCISetup(lambdas, coefs, udfs, peak_time, delta_seconds)` bundles both. `UDFs`/`Coefs` are typed NamedTuples.
+- The arrays have one mode per compartment (+ ke0), not a fixed 4. `model` detects the first dose with `Ap[0] == 0` (as before) and raises ValueError when effect targeting is asked without an effect site. Before, models without ke0 crashed in `calculate_udfs` (`peak_time` unbound). The `print` calls became warnings.
+- Effect UDF peak search: `prior` starts at `e_udf[delta_seconds]` (before, it was `e_udf[delta_seconds - 2]`, a leftover loop index). The peak times are unchanged.
+- Golden: `tests/golden/generate_tci.py` (old API, can no longer run) wrote `tests/golden/tci/runs.npz` from the step-5 code. It is in a subfolder so the `test_golden.py` glob skips it. It covers Eleveld propofol, Marsh and Minto: lambdas, coefficients, UDFs, peak time, and the rate/Cp/Ce of a 30-min plasma- and effect-targeted run (targets 3→4→2). The new code matches to 1e-9.
+- `tests/test_tci.py` covers the golden match, PKParameters vs model input, the seconds boundary (lambdas·60 = eigenvalues, Σcoef = 60/CL), the controller's Cp/Ce vs `m.simulate` of its own rates, plasma targeting on Kataria (no ke0) and the effect-target first dose at `peak_time`.
+
+**Original spec:**
 - `tci.py` takes a `LinearPKModel` (or `PKParameters`) instead of its own `Parameters` dataclass. Lambdas and coefficients come from `eigen.eigendecomposition` plus the STANPUMP ordering helper from step 1.
 - Seconds conversion happens at this boundary only. This also fixes the bug where `per_minutes` sets `time_unit="seconds"`.
 - Tests: `tci.model` plasma-target rate for Eleveld propofol is unchanged before and after.
