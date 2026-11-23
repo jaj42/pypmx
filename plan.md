@@ -85,7 +85,17 @@ Port `/home/jaj/devel/pmxmc/src/pmxmc/advan/eig.py` to numpy:
   - With forcing, starting from steady state `-S⁻¹f`, the state stays constant.
   - A zero eigenvalue gives a finite result (pure integrator ⇒ linear growth).
 
-### 2. Base class (`src/pypmx/pk.py`)
+### 2. Base class (`src/pypmx/pk.py`) — DONE
+**Outcome / deviations** (the original spec follows below):
+- `PKParameters` field order is `V1, CL, V2=nan, V3=nan, Q2=0, Q3=0, ke0=0` (a NamedTuple field cannot be required after a defaulted one). `k21`/`k31` are 0 (not nan) when the matching Q is 0. `n_cmt` raises if Q3 ≠ 0 while Q2 = 0. There is also a `has_effect_site` property (ke0 ≠ 0).
+- `pk.py` already defines `Units` and a default `Covariates` (age 35, weight 70, height 170, sex "m"). Step 3 uses them, or drug-specific NamedTuples, through `_set_covariates(covars, Cls)`.
+- `forcing` and `lag` are properties, so subclasses override them with properties (step 4).
+- `covariate_ranges: {name: (lo, hi)}`. `_check_ranges(values, stacklevel)` is also called directly for derived covariates (e.g. Kuipers QI in step 3).
+- `_set_covariates` uses `filter_valid`, so unknown keys are now **ignored silently**. Before, `Covariates(**covars)` raised on them.
+- `Prediction(t, cp, ce, states)`. The `effect` field is still to be added in step 4.
+- `tests/test_pk.py` checks: micro constants, n_cmt, matrix shape and eigenvalues for 1/2/3 comp ± Ce, `ode` vs `system_matrix` and vs the legacy `pk_2comp`/`pk_3comp`, `simulate` vs `solve_ivp(m.ode)`, the 1-comp analytic solution, Ce → Cp at steady state, forcing steady state, lag shift, `with_parameters`, range warnings and `repr`. Step 3 has to drop the `standard_models` cross-check when it deletes that module.
+
+**Original spec:**
 - `PKParameters(NamedTuple)`: `V1, V2=nan, V3=nan, CL, Q2=0, Q3=0, ke0=0`. The micro constants `k10, k12, k21, k13, k31` are properties. `n_cmt` is inferred (Q3 == 0 ⇒ 2-comp, Q2 == 0 ⇒ 1-comp).
 - Class `LinearPKModel`:
   - Class attributes: `units`, `covariate_ranges: dict[str, tuple]`.
