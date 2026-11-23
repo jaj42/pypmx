@@ -1,6 +1,7 @@
 from .cefazolin import Cefazolin
 from .dexmedetomidine import Dyck as DyckDexmedetomidine
 from .dexmedetomidine import Hannivoort as HannivoortDexmedetomidine
+from .lidocaine import Kuipers as KuipersLidocaine
 from .midazolam import Zomorodi as ZomorodiMidazolam
 from .noradrenaline import Noradrenaline
 from .paracetamol import Allegaert as AllegaertParacetamol
@@ -20,6 +21,7 @@ all = [
     Cefazolin,
     DyckDexmedetomidine,
     HannivoortDexmedetomidine,
+    KuipersLidocaine,
     EleveldPropofol,
     GeptsSufentanil,
     GrassinDelyleTranexamicAcid,
