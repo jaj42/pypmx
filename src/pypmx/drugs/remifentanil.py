@@ -1,87 +1,54 @@
-from functools import partial
-from math import exp, nan
 from collections.abc import Mapping
-from typing import Any, NamedTuple
-
-import numpy as np
+from math import exp
+from typing import Any, ClassVar
 
 from pypmx import leanbodymass
-from pypmx.standard_models import pk_3comp
+from pypmx.pk import Covariates, LinearPKModel, PKParameters, Units
 
 
-class Units(NamedTuple):
-    time: str
-    cp: str
-    effect: str | None = None
+class Minto(LinearPKModel):
+    """
+    Minto remifentanil model
 
+    Units:
+    age (years), weight (kg), height (cm), time (min), volumes (L),
+    clearances (L/min), concentrations (ng/ml)
 
-class Covariates(NamedTuple):
-    age: int = 35
-    weight: float = 70
-    height: float = 170
-    sex: str = "m"
+    Reference:
+    Minto CF, Schnider TW, Egan TD, Youngs E, Lemmens HJ, Gambus PL, Billard V,
+    Hoke JF, Moore KH, Hermann DJ, Muir KT, Mandema JW, Shafer SL.
+    Influence of age and gender on the pharmacokinetics and pharmacodynamics of
+    remifentanil. I. Model development. Anesthesiology. 1997;86(1):10-23.
 
+    Lean body mass from the James formula.
+    """
 
-class Minto:
-    units: Units = Units(time="min", cp="ng/ml")
-
-    class Parameters(NamedTuple):
-        V1: float = nan
-        V2: float = nan
-        V3: float = nan
-        Q2: float = nan
-        Q3: float = nan
-        CL: float = nan
-        k12: float = nan
-        k21: float = nan
-        k13: float = nan
-        k31: float = nan
-        k10: float = nan
-        ke0: float = nan
+    units: ClassVar[Units] = Units(time="min", cp="ng/ml")
 
     def __init__(self, covars: Mapping[str, Any] | None = None):
-        self.covars = Covariates(**covars) if covars is not None else Covariates()
-        c = self.covars
-        lean_body_mass = leanbodymass.james(c.height, c.weight, c.sex)
-
-        v1 = 5.1 - 0.0201 * (c.age - 40) + 0.072 * (lean_body_mass - 55)
-        v2 = 9.82 - 0.0811 * (c.age - 40) + 0.108 * (lean_body_mass - 55)
-        v3 = 5.42
-
-        k10 = (2.6 - 0.0162 * (c.age - 40) + 0.0191 * (lean_body_mass - 55)) / v1
-        k12 = (2.05 - 0.0301 * (c.age - 40)) / v1
-        k13 = (0.076 - 0.00113 * (c.age - 40)) / v1
-        k21 = k12 * (v1 / v2)
-        k31 = k13 * (v1 / v3)
-
-        ke0 = 0.595 - 0.007 * (c.age - 40)
-
-        self.parameters = self.Parameters(
-            V1=v1, V2=v2, V3=v3,
-            Q2 = k12 * v1,
-            Q3 = k13 * v1,
-            CL = k10 * v1,
-            k12=k12, k21=k21,
-            k13=k13, k31=k31,
-            k10=k10, ke0=ke0,
-        )  # fmt: skip
-        self.ode = partial(pk_3comp, p=self.parameters._asdict())
-
-    @property
-    def system_matrix(self):
-        p = self.parameters
-        k123 = p.k10 + p.k12 + p.k13
-        return np.array(
-            [
-                [ -k123,  p.k12,  p.k13,      0],
-                [ p.k21, -p.k21,      0,      0],
-                [ p.k31,      0, -p.k31,      0],
-                [ p.ke0,      0,      0, -p.ke0],
-            ]
-        )  # fmt: skip
+        c = self._set_covariates(covars, Covariates)
+        lbm = leanbodymass.james(c.height, c.weight, c.sex)
+        age = c.age - 40
+        self.pk = PKParameters(
+            V1=5.1 - 0.0201 * age + 0.072 * (lbm - 55),
+            V2=9.82 - 0.0811 * age + 0.108 * (lbm - 55),
+            V3=5.42,
+            CL=2.6 - 0.0162 * age + 0.0191 * (lbm - 55),
+            Q2=2.05 - 0.0301 * age,
+            Q3=0.076 - 0.00113 * age,
+            ke0=0.595 - 0.007 * age,
+        )
 
 
-class Eleveld:
+def _ageing(i: float, age: float) -> float:
+    return exp(i * (age - 35))
+
+
+def _sigmoid(x: float, e50: float, y: float) -> float:
+    return (x**y) / ((x**y) + (e50**y))
+
+
+class Eleveld(LinearPKModel):
     """
     Eleveld universal remifentanil model
 
@@ -96,32 +63,10 @@ class Eleveld:
     doi: 10.1097/ALN.0000000000001634.
     """
 
-    units: Units = Units(time="min", cp="ng/ml")
-
-    class Parameters(NamedTuple):
-        V1: float = nan
-        V2: float = nan
-        V3: float = nan
-        Q2: float = nan
-        Q3: float = nan
-        CL: float = nan
-        k12: float = nan
-        k21: float = nan
-        k13: float = nan
-        k31: float = nan
-        k10: float = nan
-        ke0: float = nan
+    units: ClassVar[Units] = Units(time="min", cp="ng/ml")
 
     def __init__(self, covars: Mapping[str, Any] | None = None):
-        self.covars = Covariates(**covars) if covars is not None else Covariates()
-        c = self.covars
-
-        def ageing(i, age):
-            return exp(i * (age - 35))
-
-        def sigmoid(x, e50, y):
-            sig = (x**y) / ((x**y) + (e50**y))
-            return sig
+        c = self._set_covariates(covars, Covariates)
 
         v1ref = 5.81
         v2ref = 8.82
@@ -142,48 +87,30 @@ class Eleveld:
         ffmref = leanbodymass.alsallami(35, 170, 70, "m")
         Fsize = ffm / ffmref
 
-        mat = sigmoid(c.weight, theta1, 2)
-        matref = sigmoid(70, theta1, 2)
+        mat = _sigmoid(c.weight, theta1, 2)
+        matref = _sigmoid(70, theta1, 2)
         Fmat = mat / matref
 
         if c.sex == "m":
             Fsex = 1
         elif c.sex == "f":
-            Fsex = 1 + theta5 * sigmoid(c.age, 12, 6) * (1 - sigmoid(c.age, 45, 6))
+            Fsex = 1 + theta5 * _sigmoid(c.age, 12, 6) * (1 - _sigmoid(c.age, 45, 6))
         else:
             raise ValueError(f"Unknown sex {c.sex}")
 
-        v1 = v1ref * Fsize * ageing(theta2, c.age)
-        v2 = v2ref * Fsize * ageing(theta3, c.age) * Fsex
-        v3 = v3ref * Fsize * ageing(theta4, c.age) * exp(theta6 * (c.weight - 70))
+        v1 = v1ref * Fsize * _ageing(theta2, c.age)
+        v2 = v2ref * Fsize * _ageing(theta3, c.age) * Fsex
+        v3 = v3ref * Fsize * _ageing(theta4, c.age) * exp(theta6 * (c.weight - 70))
 
-        CL = clref * Fsize**0.75 * Fmat * Fsex * ageing(theta3, c.age)
-        Q2 = q2ref * (v2 / v2ref) ** 0.75 * ageing(theta2, c.age) * Fsex
-        Q3 = q3ref * (v3 / v3ref) ** 0.75 * ageing(theta2, c.age)
-
-        ke0 = 1.09 * ageing(-0.0289, c.age)
-
-        self.parameters = self.Parameters(
-            V1=v1, V2=v2, V3=v3,
-            Q2=Q2, Q3=Q3, CL=CL,
-            k12=Q2 / v1, k21=Q2 / v2,
-            k13=Q3 / v1, k31=Q3 / v3,
-            k10=CL / v1, ke0=ke0,
-        )  # fmt: skip
-        self.ode = partial(pk_3comp, p=self.parameters._asdict())
-
-    @property
-    def system_matrix(self):
-        p = self.parameters
-        k123 = p.k10 + p.k12 + p.k13
-        return np.array(
-            [
-                [ -k123,  p.k12,  p.k13,      0],
-                [ p.k21, -p.k21,      0,      0],
-                [ p.k31,      0, -p.k31,      0],
-                [ p.ke0,      0,      0, -p.ke0],
-            ]
-        )  # fmt: skip
+        self.pk = PKParameters(
+            V1=v1,
+            V2=v2,
+            V3=v3,
+            CL=clref * Fsize**0.75 * Fmat * Fsex * _ageing(theta3, c.age),
+            Q2=q2ref * (v2 / v2ref) ** 0.75 * _ageing(theta2, c.age) * Fsex,
+            Q3=q3ref * (v3 / v3ref) ** 0.75 * _ageing(theta2, c.age),
+            ke0=1.09 * _ageing(-0.0289, c.age),
+        )
 
     def bsv(self):
         # $OMEGA

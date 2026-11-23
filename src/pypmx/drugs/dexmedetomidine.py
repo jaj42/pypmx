@@ -1,25 +1,7 @@
-from functools import partial
-from math import nan
 from collections.abc import Mapping
-from typing import Any, NamedTuple
+from typing import Any, ClassVar, NamedTuple
 
-import numpy as np
-
-from pypmx.standard_models import pk_3comp
-
-
-class Units(NamedTuple):
-    time: str
-    cp: str
-    effect: str | None = None
-
-
-class Covariates(NamedTuple):
-    age: int = 35
-    weight: float = 70
-    height: float = 170
-    sex: str = "m"
-
+from pypmx.pk import Covariates, LinearPKModel, PKParameters, Units
 
 # Colin PJ, Hannivoort LN, Eleveld DJ, Reyntjens KMEM, Absalom AR, Vereecke HEM, Struys MMRF.
 # Dexmedetomidine pharmacokinetic-pharmacodynamic modelling in healthy volunteers:
@@ -33,7 +15,7 @@ COLIN_EFFECTS = {
 }
 
 
-class Hannivoort:
+class Hannivoort(LinearPKModel):
     """3 compartment dexmedetomidine PK model
 
     Units:
@@ -49,35 +31,21 @@ class Hannivoort:
     MOAA/S (effect="moaas", default) or BIS (effect="bis").
     """
 
-    units: Units = Units(time="min", cp="ng/ml")
+    units: ClassVar[Units] = Units(time="min", cp="ng/ml")
+    options: ClassVar[tuple[str, ...]] = ("effect",)
 
     class Parameters(NamedTuple):
-        # PK
-        V1: float = nan
-        V2: float = nan
-        V3: float = nan
-        Q2: float = nan
-        Q3: float = nan
-        CL: float = nan
-        k12: float = nan
-        k21: float = nan
-        k13: float = nan
-        k31: float = nan
-        k10: float = nan
-        ke0: float = nan
         v1ref: float = 1.78
         v2ref: float = 30.3
         v3ref: float = 52.0
         clref: float = 0.686
         q2ref: float = 2.98
         q3ref: float = 0.602
-        # PD
-        ce50: float = nan
-        # Reference values
         weight_ref: float = 70
+        # PD (from the selected Colin effect)
+        ce50: float = 0.0
 
-    def __repr__(self):
-        return f"Dexmedetomidine Hannivoort ({self.covars}, effect={self.effect})"
+    parameters: Parameters
 
     def __init__(
         self,
@@ -88,47 +56,26 @@ class Hannivoort:
             raise ValueError(
                 f"Unknown effect {effect!r}, expected one of {list(COLIN_EFFECTS)}"
             )
-        self.covars = Covariates(**covars) if covars is not None else Covariates()
         self.effect = effect
-        self.units = Units(time="min", cp="ng/ml", effect=effect)
-        p = self.Parameters()
-        c = self.covars
+        c = self._set_covariates(covars, Covariates)
+        p = self.Parameters(ce50=COLIN_EFFECTS[effect]["ce50"])
+        self.parameters = p
 
         wt = c.weight / p.weight_ref
-        v1 = p.v1ref * wt
-        v2 = p.v2ref * wt
-        v3 = p.v3ref * wt
-
-        CL = p.clref * wt**0.75
-        Q2 = p.q2ref * (v2 / p.v2ref) ** 0.75
-        Q3 = p.q3ref * (v3 / p.v3ref) ** 0.75
-
-        self.parameters = p._replace(
-            V1=v1, V2=v2, V3=v3,
-            Q2=Q2, Q3=Q3, CL=CL,
-            k12=Q2 / v1, k21=Q2 / v2,
-            k13=Q3 / v1, k31=Q3 / v3,
-            k10=CL / v1,
+        V2 = p.v2ref * wt
+        V3 = p.v3ref * wt
+        self.pk = PKParameters(
+            V1=p.v1ref * wt,
+            V2=V2,
+            V3=V3,
+            CL=p.clref * wt**0.75,
+            Q2=p.q2ref * (V2 / p.v2ref) ** 0.75,
+            Q3=p.q3ref * (V3 / p.v3ref) ** 0.75,
             ke0=COLIN_EFFECTS[effect]["ke0"],
-            ce50=COLIN_EFFECTS[effect]["ce50"],
-        )  # fmt: skip
-        self.ode = partial(pk_3comp, p=self.parameters._asdict())
-
-    @property
-    def system_matrix(self):
-        p = self.parameters
-        k123 = p.k10 + p.k12 + p.k13
-        return np.array(
-            [
-                [ -k123,  p.k12,  p.k13,      0],
-                [ p.k21, -p.k21,      0,      0],
-                [ p.k31,      0, -p.k31,      0],
-                [ p.ke0,      0,      0, -p.ke0],
-            ]
-        )  # fmt: skip
+        )
 
 
-class Dyck:
+class Dyck(LinearPKModel):
     """3 compartment dexmedetomidine PK model (no effect site)
 
     Units:
@@ -141,55 +88,15 @@ class Dyck:
     Anesthesiology. 1993 May;78(5):821-8. doi:10.1097/00000542-199305000-00003
     """
 
-    units: Units = Units(time="min", cp="ng/ml")
-
-    class Parameters(NamedTuple):
-        V1: float = nan
-        V2: float = nan
-        V3: float = nan
-        Q2: float = nan
-        Q3: float = nan
-        CL: float = nan
-        k12: float = nan
-        k21: float = nan
-        k13: float = nan
-        k31: float = nan
-        k10: float = nan
-        ke0: float = 0
-
-    def __repr__(self):
-        return f"Dexmedetomidine Dyck ({self.covars})"
+    units: ClassVar[Units] = Units(time="min", cp="ng/ml")
 
     def __init__(self, covars: Mapping[str, Any] | None = None):
-        self.covars = Covariates(**covars) if covars is not None else Covariates()
-        c = self.covars
-
-        v1 = 7.99
-        v2 = 13.8
-        v3 = 187
-
-        CL = 0.00791 * c.height - 0.928
-        Q2 = 2.26
-        Q3 = 1.99
-
-        self.parameters = self.Parameters(
-            V1=v1, V2=v2, V3=v3,
-            Q2=Q2, Q3=Q3, CL=CL,
-            k12=Q2 / v1, k21=Q2 / v2,
-            k13=Q3 / v1, k31=Q3 / v3,
-            k10=CL / v1,
-        )  # fmt: skip
-        self.ode = partial(pk_3comp, p=self.parameters._asdict())
-
-    @property
-    def system_matrix(self):
-        p = self.parameters
-        k123 = p.k10 + p.k12 + p.k13
-        return np.array(
-            [
-                [ -k123,  p.k12,  p.k13,      0],
-                [ p.k21, -p.k21,      0,      0],
-                [ p.k31,      0, -p.k31,      0],
-                [ p.ke0,      0,      0, -p.ke0],
-            ]
-        )  # fmt: skip
+        c = self._set_covariates(covars, Covariates)
+        self.pk = PKParameters(
+            V1=7.99,
+            V2=13.8,
+            V3=187,
+            CL=0.00791 * c.height - 0.928,
+            Q2=2.26,
+            Q3=1.99,
+        )

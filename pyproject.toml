@@ -40,7 +40,6 @@ root = ["src", "tests"]
 # Legacy modules, removed or rewritten during the PK API unification (plan.md
 # steps 3-5). Do not add new files here.
 exclude = [
-    "src/pypmx/ode.py",
     "src/pypmx/drugs/alfentanil.py",
     "src/pypmx/drugs/cefazolin.py",
     "src/pypmx/drugs/noradrenaline_old.py",

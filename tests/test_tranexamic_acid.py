@@ -4,37 +4,26 @@ import numpy as np
 import pytest
 from scipy.integrate import solve_ivp
 
-from pypmx import eigen
 from pypmx.drugs import GrassinDelyleTranexamicAcid as Model
-
-
-def _unit_bolus(m):
-    """Input vector of a unit bolus into the central compartment (concentration
-    space: the bolus raises C1 by 1/V1)."""
-    B = np.zeros(m.system_matrix.shape[0])
-    B[0] = 1 / m.parameters.V1
-    return B
 
 
 def simulate(model, inf, t_end, dt=0.1):
     t = np.arange(0, t_end + dt, dt)
-    sol = solve_ivp(
-        model.ode, (0, t_end), [0, 0, 0], t_eval=t, args=(inf,), max_step=0.5
-    )
-    return t, sol.y[0] / model.parameters.V1
+    sol = solve_ivp(model.ode, (0, t_end), [0, 0], t_eval=t, args=(inf,), max_step=0.5)
+    return t, sol.y[0] / model.pk.V1
 
 
 @pytest.mark.parametrize("weight", [50, 64.2, 70, 100])
 def test_parameters_finite_positive(weight):
-    p = Model({"weight": weight}).parameters
+    p = Model({"weight": weight}).pk
     for name in ("V1", "V2", "Q2", "CL", "k12", "k21", "k10"):
         value = getattr(p, name)
         assert np.isfinite(value) and value > 0, name
-    assert p.ke0 == 0
+    assert p.ke0 == 0 and p.n_cmt == 2
 
 
 def test_reference_values_at_70kg():
-    p = Model({"weight": 70}).parameters
+    p = Model({"weight": 70}).pk
     assert p.CL == pytest.approx(10.1 / 60)
     assert p.Q2 == pytest.approx(15.6 / 60)
     assert p.V1 == pytest.approx(7.7)
@@ -42,8 +31,8 @@ def test_reference_values_at_70kg():
 
 
 def test_allometric_scaling():
-    ref = Model({"weight": 70}).parameters
-    p = Model({"weight": 91}).parameters
+    ref = Model({"weight": 70}).pk
+    p = Model({"weight": 91}).pk
     f = 91 / 70
     assert p.CL == pytest.approx(ref.CL * f**0.75)
     assert p.Q2 == pytest.approx(ref.Q2 * f**0.75)
@@ -55,29 +44,26 @@ def test_warnings_outside_studied_range():
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         Model({"weight": 64, "age": 30})
-    with pytest.warns(UserWarning, match="Weight"):
+    with pytest.warns(UserWarning, match="weight"):
         Model({"weight": 120})
-    with pytest.warns(UserWarning, match="Age"):
+    with pytest.warns(UserWarning, match="age"):
         Model({"age": 70})
 
 
-def test_ode_bolus_matches_eigen_impulse_response():
+def test_simulate_bolus_matches_solve_ivp():
     m = Model({"weight": 64.2})
-    p = m.parameters
-    modes = eigen.eigendecomposition(m.system_matrix, _unit_bolus(m))
     t = np.linspace(0, 600, 601)
-    cp_eigen = eigen.calculate_impulse_response(modes, t)
-
+    cp = m.simulate([0.0], [0.0], t, y0=[1.0, 0]).cp
     sol = solve_ivp(
         m.ode,
         (0, 600),
-        [1.0, 0, 0],
+        [1.0, 0],
         t_eval=t,
         args=(lambda t: 0.0,),
         rtol=1e-10,
         atol=1e-12,
     )
-    np.testing.assert_allclose(sol.y[0] / p.V1, cp_eigen, rtol=1e-6, atol=1e-9)
+    np.testing.assert_allclose(sol.y[0] / m.pk.V1, cp, rtol=1e-6, atol=1e-9)
 
 
 def test_1g_iv_over_10min_matches_paper():

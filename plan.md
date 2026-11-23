@@ -85,7 +85,7 @@ Port `/home/jaj/devel/pmxmc/src/pmxmc/advan/eig.py` to numpy:
   - With forcing, starting from steady state `-S⁻¹f`, the state stays constant.
   - A zero eigenvalue gives a finite result (pure integrator ⇒ linear growth).
 
-### 2. Base class (`src/pypmx/pk.py`) — DONE
+### 2. Base class (`src/pypmx/pk.py`) — DONE (c344554)
 **Outcome / deviations** (the original spec follows below):
 - `PKParameters` field order is `V1, CL, V2=nan, V3=nan, Q2=0, Q3=0, ke0=0` (a NamedTuple field cannot be required after a defaulted one). `k21`/`k31` are 0 (not nan) when the matching Q is 0. `n_cmt` raises if Q3 ≠ 0 while Q2 = 0. There is also a `has_effect_site` property (ke0 ≠ 0).
 - `pk.py` already defines `Units` and a default `Covariates` (age 35, weight 70, height 170, sex "m"). Step 3 uses them, or drug-specific NamedTuples, through `_set_covariates(covars, Cls)`.
@@ -109,7 +109,19 @@ Port `/home/jaj/devel/pmxmc/src/pmxmc/advan/eig.py` to numpy:
   - `_set_covariates(covars, Covariates)` builds the NamedTuple, uses `utils.filter_valid` (already moved in step 0) and warns outside `covariate_ranges`.
 - Tests: `PKParameters` micro constants, matrix shape for 1/2/3 comp ± effect site, and `ode` vs `system_matrix` consistency.
 
-### 3. Migrate the NamedTuple-style models
+### 3. Migrate the NamedTuple-style models — DONE
+**Outcome / deviations** (the original spec follows below):
+- Migrated: Eleveld/Schnider propofol, Eleveld/Minto remifentanil, Hannivoort/Dyck dexmedetomidine, Grassin-Delyle TXA, Allegaert paracetamol, Zomorodi midazolam, Kuipers lidocaine. Marsh/Kataria/Paedfusor are untouched in `propofol.py` (step 5) and still use its `Covariates` (which now also feeds Eleveld/Schnider).
+- `parameters` is **no longer declared on the base** (ty rejects narrowing a mutable attribute). Subclasses that have one declare `parameters: Parameters`: it holds only thetas/refs/PD and derived covariates (Eleveld propofol `ce50`/`bis_delay`, Hannivoort `ce50`, Kuipers `QI`, Zomorodi `BSA`). PK values and micro constants live only in `m.pk`. Dyck, Minto, Schnider and Eleveld remifentanil have no `parameters`.
+- Base gained `options: ClassVar[tuple[str, ...]]`: constructor options shown by `repr` (`effect`, `setting`, `bsa_adjusted`, `model`).
+- Drug-specific `Covariates` are kept where defaults differ from `pk.Covariates` (TXA, paracetamol, midazolam, lidocaine, propofol `opiates`). `age` is now typed `float`.
+- Range warnings now come from `covariate_ranges` and use the covariate name (`weight`, `age`, `QI`, `cardiac_output`). Tests match on those names. Paracetamol's "pregnancy with sex m" warning stays hand-written.
+- Hannivoort `units.effect` is no longer set per instance (`units` is a ClassVar); the endpoint is `m.effect`.
+- Minto is written in its published macro form (CL, Q2, Q3), which is identical to the old k-form up to rounding. **Schnider** keeps the k-form (V1 + k10…k31, as in STANPUMP) with `V2 = Q2/k21`, `V3 = Q3/k31`. **The Schnider snapshots were regenerated** (`MICRO_DEFINED` in `generate.py`): only the reported V2/V3 change (25.938 → 25.907, 238 → 239.12 at default covariates). Cp/Ce/eigenvalues are bit-identical.
+- `SIM_RTOL` in `test_golden.py` is **1e-6 → 2e-5**. The snapshots' solve_ivp reference is only accurate to ~8e-6 relative (checked against `expm`), while `eig_advan` matches `expm` to ~1e-14. Parameters and eigenvalues are still checked at 1e-10.
+- `test_golden.py` has a generic `linear_pk_adapter(cls)` for all migrated models. `standard_models.py` and `ode.py` are deleted. The legacy cross-check in `test_pk.py` is replaced by a written-out 3-comp+Ce equations test. New `tests/test_linear_models.py` covers every migrated model: structure, `simulate` vs `solve_ivp(m.ode)`, steady state rate/CL, repr and derived parameters.
+
+**Original spec:**
 Pattern for each drug:
 - The class inherits `LinearPKModel`. `__init__` computes `CL, Q2, Q3, V1–V3, ke0` and builds `self.pk`.
 - Remove the per-drug `system_matrix`, k-derivation, `partial(pk_Ncomp)` and the hand-written range warnings. The ranges move to `covariate_ranges`.

@@ -1,31 +1,44 @@
 import warnings
-from functools import partial
-from math import exp, nan
 from collections.abc import Mapping
-from typing import Any, NamedTuple
-
-import numpy as np
+from math import exp, nan
+from typing import Any, ClassVar, NamedTuple
 
 from pypmx import leanbodymass
-from pypmx.standard_models import pk_3comp
-
-
-class Units(NamedTuple):
-    time: str
-    cp: str
-    effect: str | None = None
+from pypmx.pk import LinearPKModel, PKParameters, Units
 
 
 class Covariates(NamedTuple):
-    age: int = 35
+    age: float = 35
     weight: float = 70
     height: float = 170
     sex: str = "m"
     opiates: bool = True
 
 
-class Eleveld:
-    units: Units = Units(time="min", cp="ug/ml")
+def _sigmoid(x: float, e50: float, y: float) -> float:
+    return (x**y) / ((x**y) + (e50**y))
+
+
+class Eleveld(LinearPKModel):
+    """
+    Eleveld propofol model (PK and BIS PD)
+
+    Units:
+    age (years), weight (kg), height (cm), time (min), volumes (L),
+    clearances (L/min), concentrations (ug/ml)
+
+    Reference:
+    Eleveld DJ, Colin P, Absalom AR, Struys MMRF. Pharmacokinetic-
+    pharmacodynamic model for propofol for broad application in anaesthesia
+    and sedation. Br J Anaesth. 2018;120(5):942-959.
+    doi:10.1016/j.bja.2018.01.018.
+
+    Arterial PK; ``opiates`` (default True) selects the age-related decline in
+    CL and V3 seen with concomitant opiates. ``parameters`` holds the thetas
+    and the derived PD values ``ce50`` and ``bis_delay``.
+    """
+
+    units: ClassVar[Units] = Units(time="min", cp="ug/ml")
 
     class Parameters(NamedTuple):
         """
@@ -66,18 +79,6 @@ class Eleveld:
         """
 
         # PK
-        V1: float = nan
-        V2: float = nan
-        V3: float = nan
-        Q2: float = nan
-        Q3: float = nan
-        CL: float = nan
-        k12: float = nan
-        k21: float = nan
-        k13: float = nan
-        k31: float = nan
-        k10: float = nan
-        ke0: float = nan
         v1ref: float = 6.283
         v2ref: float = 25.501
         v3ref: float = 272.817
@@ -97,8 +98,8 @@ class Eleveld:
         v1_venous: float = 1.419
         q2_venous: float = 0.681
         # PD
-        ce50: float = nan
-        bis_delay: float = nan
+        ce50: float = nan  # derived
+        bis_delay: float = nan  # derived
         ce50_ref: float = 3.08
         ke0_ref: float = 0.14631
         bis_ref: float = 92.98
@@ -114,26 +115,29 @@ class Eleveld:
         height_ref: int = 170
         sex_ref: str = "m"
 
-    def __repr__(self):
-        return f"Propofol Eleveld ({self.covars})"
+    parameters: Parameters
 
     def __init__(self, covars: Mapping[str, Any] | None = None):
-        self.covars = Covariates(**covars) if covars is not None else Covariates()
-        self.parameters = self.Parameters()
-        p = self.parameters
-        c = self.covars
+        c = self._set_covariates(covars, Covariates)
+        p = self.Parameters()
+
+        def ageing(x: float) -> float:
+            return exp(x * (c.age - p.age_ref))
+
+        def central(x: float) -> float:
+            return _sigmoid(x, p.e50_v1, 1)
 
         # post menstrual age
-        pma = self.covars.age * 52 + 40
-        pmaref = self.parameters.age_ref * 52 + 40
+        pma = c.age * 52 + 40
+        pmaref = p.age_ref * 52 + 40
 
         # clearance maturation
-        clmat = self.sigmoid(pma, p.e50_cl, p.gamma_cl)
-        clmatref = self.sigmoid(pmaref, p.e50_cl, p.gamma_cl)
+        clmat = _sigmoid(pma, p.e50_cl, p.gamma_cl)
+        clmatref = _sigmoid(pmaref, p.e50_cl, p.gamma_cl)
 
         # q3 maturation
-        q3mat = self.sigmoid(pma, p.e50_q3, 1)
-        q3matref = self.sigmoid(pmaref, p.e50_q3, 1)
+        q3mat = _sigmoid(pma, p.e50_q3, 1)
+        q3matref = _sigmoid(pmaref, p.e50_q3, 1)
 
         # fat free mass
         ffm = leanbodymass.alsallami(c.age, c.height, c.weight, c.sex)
@@ -141,14 +145,12 @@ class Eleveld:
             p.age_ref, p.height_ref, p.weight_ref, p.sex_ref
         )
 
-        v1 = p.v1ref * (self.central(c.weight) / self.central(p.weight_ref))
-        v2 = p.v2ref * (c.weight / p.weight_ref) * self.ageing(p.beta_v2_age)
+        v1 = p.v1ref * (central(c.weight) / central(p.weight_ref))
+        v2 = p.v2ref * (c.weight / p.weight_ref) * ageing(p.beta_v2_age)
         v3 = p.v3ref * (ffm / ffmref)
 
-        if c.sex == "m":
-            CL = p.clref_male * (c.weight / p.weight_ref) ** 0.75 * (clmat / clmatref)
-        else:
-            CL = p.clref_female * (c.weight / p.weight_ref) ** 0.75 * (clmat / clmatref)
+        clref = p.clref_male if c.sex == "m" else p.clref_female
+        CL = clref * (c.weight / p.weight_ref) ** 0.75 * (clmat / clmatref)
 
         if c.opiates:
             v3 *= exp(p.beta_v3_age_tech * c.age)
@@ -157,113 +159,71 @@ class Eleveld:
         Q2 = p.q2ref * (v2 / p.v2ref) ** 0.75 * (1 + p.kappa_q2_child * (1 - q3mat))
         Q3 = p.q3ref * (v3 / p.v3ref) ** 0.75 * (q3mat / q3matref)
 
-        ke0 = p.ke0_ref * ((c.weight / p.weight_ref) ** -0.25)
-        ce50 = p.ce50_ref * self.ageing(p.age_ce50)
-        bis_delay = 15 + exp(p.age_pdlag * c.age)
-
-        self.parameters = self.parameters._replace(
+        self.pk = PKParameters(
             V1=v1,
             V2=v2,
             V3=v3,
+            CL=CL,
             Q2=Q2,
             Q3=Q3,
-            CL=CL,
-            k12=Q2 / v1,
-            k21=Q2 / v2,
-            k13=Q3 / v1,
-            k31=Q3 / v3,
-            k10=CL / v1,
-            ke0=ke0,
-            ce50=ce50,
-            bis_delay=bis_delay,
+            ke0=p.ke0_ref * ((c.weight / p.weight_ref) ** -0.25),
         )
-        self.ode = partial(pk_3comp, p=self.parameters._asdict())
-
-    def ageing(self, x):
-        return exp(x * (self.covars.age - self.parameters.age_ref))
-
-    def sigmoid(self, x, e50, y):
-        return (x**y) / ((x**y) + (e50**y))
-
-    def central(self, x):
-        return self.sigmoid(x, self.parameters.e50_v1, 1)
-
-    @property
-    def system_matrix(self):
-        p = self.parameters
-        k123 = p.k10 + p.k12 + p.k13
-        return np.array(
-            [
-                [ -k123,  p.k12,  p.k13,      0],
-                [ p.k21, -p.k21,      0,      0],
-                [ p.k31,      0, -p.k31,      0],
-                [ p.ke0,      0,      0, -p.ke0],
-            ]
-        )  # fmt: skip
+        self.parameters = p._replace(
+            ce50=p.ce50_ref * ageing(p.age_ce50),
+            bis_delay=15 + exp(p.age_pdlag * c.age),
+        )
 
 
-class Schnider:
-    units: Units = Units(time="min", cp="ug/ml")
+class Schnider(LinearPKModel):
+    """
+    Schnider propofol model
 
-    class Parameters(NamedTuple):
-        V1: float = nan
-        V2: float = nan
-        V3: float = nan
-        Q2: float = nan
-        Q3: float = nan
-        CL: float = nan
-        k12: float = nan
-        k21: float = nan
-        k13: float = nan
-        k31: float = nan
-        k10: float = nan
-        ke0: float = nan
+    Units:
+    age (years), weight (kg), height (cm), time (min), volumes (L),
+    clearances (L/min), concentrations (ug/ml)
+
+    Reference:
+    Schnider TW, Minto CF, Gambus PL, Andresen C, Goodale DB, Shafer SL,
+    Youngs EJ. The influence of method of administration and covariates on the
+    pharmacokinetics of propofol in adult volunteers. Anesthesiology.
+    1998;88(5):1170-82. ke0 0.456 /min from Schnider et al. 1999 (PD).
+
+    Defined, as in STANPUMP and TCI pumps, by V1 and the micro rate constants
+    (k10, k12, k13, k21, k31; lean body mass from the James formula). The
+    published V2/V3 are rounded and slightly inconsistent with k21/k31, so
+    here ``V2 = Q2/k21`` and ``V3 = Q3/k31`` (Q = k·V1). This only affects the
+    reported volumes, not the concentrations.
+    """
+
+    units: ClassVar[Units] = Units(time="min", cp="ug/ml")
 
     def __init__(self, covars: Mapping[str, Any] | None = None):
-        self.covars = Covariates(**covars) if covars is not None else Covariates()
-        c = self.covars
-        lean_body_mass = leanbodymass.james(c.height, c.weight, c.sex)
+        c = self._set_covariates(covars, Covariates)
+        lbm = leanbodymass.james(c.height, c.weight, c.sex)
 
         v1 = 4.27
-        v2 = 18.9 - 0.391 * (c.age - 53)
-        v3 = 238
-
         k10 = (
             0.443
             + 0.0107 * (c.weight - 77)
-            - 0.0159 * (lean_body_mass - 59)
+            - 0.0159 * (lbm - 59)
             + 0.0062 * (c.height - 177)
         )
         k12 = 0.302 - 0.0056 * (c.age - 53)
         k13 = 0.196
-        k21 = (1.29 - 0.024 * (c.age - 53)) / v2
+        k21 = (1.29 - 0.024 * (c.age - 53)) / (18.9 - 0.391 * (c.age - 53))
         k31 = 0.0035
 
-        ke0 = 0.456
-
-        self.parameters = self.Parameters(
-            V1=v1, V2=v2, V3=v3,
-            Q2 = k12 * v1,
-            Q3 = k13 * v1,
-            CL = k10 * v1,
-            k12=k12, k21=k21,
-            k13=k13, k31=k31,
-            k10=k10, ke0=ke0,
-        )  # fmt: skip
-        self.ode = partial(pk_3comp, p=self.parameters._asdict())
-
-    @property
-    def system_matrix(self):
-        p = self.parameters
-        k123 = p.k10 + p.k12 + p.k13
-        return np.array(
-            [
-                [ -k123,  p.k12,  p.k13,      0],
-                [ p.k21, -p.k21,      0,      0],
-                [ p.k31,      0, -p.k31,      0],
-                [ p.ke0,      0,      0, -p.ke0],
-            ]
-        )  # fmt: skip
+        Q2 = k12 * v1
+        Q3 = k13 * v1
+        self.pk = PKParameters(
+            V1=v1,
+            V2=Q2 / k21,
+            V3=Q3 / k31,
+            CL=k10 * v1,
+            Q2=Q2,
+            Q3=Q3,
+            ke0=0.456,
+        )
 
 
 class Marsh:

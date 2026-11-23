@@ -420,6 +420,10 @@ NAMEDTUPLE_MODELS: dict[str, Callable[..., Any]] = {
     "KuipersLidocaine": KuipersLidocaine,
 }
 
+# NamedTuple models defined by V1 and micro constants whose published V2/V3 are
+# inconsistent with k21/k31: report V2/V3 derived as Q/k (see macro_from_micro).
+MICRO_DEFINED = {"Schnider"}
+
 ATTRIBUTE_MODELS: dict[str, Callable[..., Any]] = {
     "Marsh": Marsh,
     "Kataria": Kataria,
@@ -431,6 +435,9 @@ def compute_namedtuple(meta: dict[str, Any]) -> dict[str, Any]:
     m = NAMEDTUPLE_MODELS[meta["model"]](meta["covars"], **meta["options"])
     p = m.parameters
     params = params_from(p, PARAM_NAMES + MICRO_NAMES)
+    if meta["model"] in MICRO_DEFINED:
+        k = {n: params[n] for n in MICRO_NAMES}
+        params = macro_from_micro(p.V1, k, p.ke0)
     n = m.system_matrix.shape[0]
 
     def rhs(t: float, y: FloatArray, r: float) -> Any:

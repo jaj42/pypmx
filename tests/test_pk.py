@@ -8,7 +8,6 @@ import pytest
 from scipy.integrate import solve_ivp
 
 from pypmx.pk import Covariates, LinearPKModel, PKParameters, Units
-from pypmx.standard_models import pk_2comp, pk_3comp
 from pypmx.utils import continuize_order_zero
 
 THREE = dict(V1=4.0, V2=20.0, V3=150.0, CL=1.5, Q2=2.0, Q3=0.8)
@@ -94,19 +93,19 @@ def test_ode_matches_system_matrix(pk, ke0):
     np.testing.assert_allclose(dy, m.system_matrix @ y + 3.0 * m.input_matrix)
 
 
-@pytest.mark.parametrize(
-    "pk, ref_ode", [(TWO, pk_2comp), (THREE, pk_3comp)], ids=["2cmt", "3cmt"]
-)
-def test_ode_matches_standard_models(pk, ref_ode):
-    """Same amounts + Ce system as the legacy pk_2comp/pk_3comp."""
-    m = Toy({**pk, "ke0": 0.4})
+def test_ode_matches_written_out_equations():
+    """3-comp amounts + Ce, written out (replaces the legacy pk_3comp check)."""
+    m = Toy({**THREE, "ke0": 0.4})
     p = m.pk
-    params = dict(
-        V1=p.V1, k10=p.k10, k12=p.k12, k21=p.k21, k13=p.k13, k31=p.k31, ke0=p.ke0
-    )
-    y = np.random.default_rng(1).uniform(0, 10, m.n_states)
-    inf = lambda t: 2.5
-    np.testing.assert_allclose(m.ode(0.0, y, inf), ref_ode(0.0, y, inf, params))
+    A1, A2, A3, Ce = np.random.default_rng(1).uniform(0, 10, 4)
+    r = 2.5
+    expected = [
+        r + p.k21 * A2 + p.k31 * A3 - (p.k10 + p.k12 + p.k13) * A1,
+        p.k12 * A1 - p.k21 * A2,
+        p.k13 * A1 - p.k31 * A3,
+        p.ke0 * (A1 / p.V1 - Ce),
+    ]
+    np.testing.assert_allclose(m.ode(0.0, [A1, A2, A3, Ce], lambda t: r), expected)
 
 
 @pytest.mark.parametrize("pk", [ONE, TWO, THREE], ids=["1cmt", "2cmt", "3cmt"])

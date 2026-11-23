@@ -1,28 +1,17 @@
-import warnings
-from functools import partial
-from math import nan
 from collections.abc import Mapping
-from typing import Any, NamedTuple
+from typing import Any, ClassVar, NamedTuple
 
-import numpy as np
-
-from pypmx.standard_models import pk_2comp
-
-
-class Units(NamedTuple):
-    time: str
-    cp: str
-    effect: str | None = None
+from pypmx.pk import LinearPKModel, PKParameters, Units
 
 
 class Covariates(NamedTuple):
-    age: int = 25
+    age: float = 25
     weight: float = 70
     height: float = 170
     sex: str = "f"
 
 
-class GrassinDelyle:
+class GrassinDelyle(LinearPKModel):
     """2 compartment tranexamic acid PK model (no effect site)
 
     Units:
@@ -49,17 +38,13 @@ class GrassinDelyle:
     No effect site, so ke0 = 0.
     """
 
-    units: Units = Units(time="min", cp="mg/L")
+    units: ClassVar[Units] = Units(time="min", cp="mg/L")
+    covariate_ranges: ClassVar[dict[str, tuple[float, float]]] = {
+        "weight": (50, 100),
+        "age": (18, 45),
+    }
 
     class Parameters(NamedTuple):
-        V1: float = nan
-        V2: float = nan
-        Q2: float = nan
-        CL: float = nan
-        k12: float = nan
-        k21: float = nan
-        k10: float = nan
-        ke0: float = 0
         # Reference values (per 70 kg), converted to L/min
         clref: float = 10.1 / 60
         q2ref: float = 15.6 / 60
@@ -67,43 +52,15 @@ class GrassinDelyle:
         v2ref: float = 10.8
         weight_ref: float = 70
 
-    def __repr__(self):
-        return f"Tranexamic acid Grassin-Delyle ({self.covars})"
+    parameters: Parameters
 
     def __init__(self, covars: Mapping[str, Any] | None = None):
-        self.covars = Covariates(**covars) if covars is not None else Covariates()
-        c = self.covars
-        if not 50 <= c.weight <= 100:
-            warnings.warn(
-                f"Weight {c.weight} kg outside studied range (50-100 kg)", stacklevel=2
-            )
-        if not 18 <= c.age <= 45:
-            warnings.warn(
-                f"Age {c.age} y outside studied range (18-45 y)", stacklevel=2
-            )
-
-        p = self.Parameters()
+        c = self._set_covariates(covars, Covariates)
+        p = self.parameters = self.Parameters()
         wt = c.weight / p.weight_ref
-        v1 = p.v1ref * wt
-        v2 = p.v2ref * wt
-        CL = p.clref * wt**0.75
-        Q2 = p.q2ref * wt**0.75
-
-        self.parameters = p._replace(
-            V1=v1, V2=v2,
-            Q2=Q2, CL=CL,
-            k12=Q2 / v1, k21=Q2 / v2,
-            k10=CL / v1,
-        )  # fmt: skip
-        self.ode = partial(pk_2comp, p=self.parameters._asdict())
-
-    @property
-    def system_matrix(self):
-        p = self.parameters
-        return np.array(
-            [
-                [ -(p.k10 + p.k12),  p.k12,      0],
-                [            p.k21, -p.k21,      0],
-                [            p.ke0,      0, -p.ke0],
-            ]
-        )  # fmt: skip
+        self.pk = PKParameters(
+            V1=p.v1ref * wt,
+            V2=p.v2ref * wt,
+            CL=p.clref * wt**0.75,
+            Q2=p.q2ref * wt**0.75,
+        )

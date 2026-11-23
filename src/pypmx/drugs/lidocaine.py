@@ -1,30 +1,19 @@
-import warnings
-from functools import partial
-from math import nan
 from collections.abc import Mapping
-from typing import Any, NamedTuple
-
-import numpy as np
+from typing import Any, ClassVar, NamedTuple
 
 from pypmx.leanbodymass import bmi
-from pypmx.standard_models import pk_3comp
-
-
-class Units(NamedTuple):
-    time: str
-    cp: str
-    effect: str | None = None
+from pypmx.pk import LinearPKModel, PKParameters, Units
 
 
 class Covariates(NamedTuple):
-    age: int = 45
+    age: float = 45
     weight: float = 75
     height: float = 174
     sex: str = "m"
     cardiac_output: float = 5.8
 
 
-class Kuipers:
+class Kuipers(LinearPKModel):
     """3 compartment intravenous lidocaine PK model (no effect site)
 
     Units:
@@ -75,26 +64,20 @@ class Kuipers:
     No effect site, so ke0 = 0.
     """
 
-    units: Units = Units(time="min", cp="mg/L")
+    units: ClassVar[Units] = Units(time="min", cp="mg/L")
+    covariate_ranges: ClassVar[dict[str, tuple[float, float]]] = {
+        "age": (19, 76),
+        "weight": (51, 102),
+        "QI": (20.4, 33.3),  # Quetelet index, derived from height and weight
+        "cardiac_output": (3.6, 10.0),
+    }
+    options: ClassVar[tuple[str, ...]] = ("model",)
     models = ("A", "B", "C", "D")
 
     class Parameters(NamedTuple):
-        V1: float = nan
-        V2: float = nan
-        V3: float = nan
-        CL: float = nan
-        Q2: float = nan
-        Q3: float = nan
-        k12: float = nan
-        k21: float = nan
-        k13: float = nan
-        k31: float = nan
-        k10: float = nan
-        ke0: float = 0
-        QI: float = nan
+        QI: float  # derived covariate: Quetelet index (BMI, kg/m^2)
 
-    def __repr__(self):
-        return f"Lidocaine Kuipers ({self.covars}, model={self.model!r})"
+    parameters: Parameters
 
     def __init__(
         self,
@@ -103,23 +86,12 @@ class Kuipers:
     ):
         if model not in self.models:
             raise ValueError(f"model must be one of {self.models}, got {model!r}")
-        self.covars = Covariates(**covars) if covars is not None else Covariates()
         self.model = model
-        c = self.covars
+        c = self._set_covariates(covars, Covariates)
         qi = bmi(c.height, c.weight)
+        self._check_ranges({"QI": qi})
+        self.parameters = self.Parameters(QI=qi)
         co = c.cardiac_output
-
-        for name, value, lo, hi, unit in (
-            ("Age", c.age, 19, 76, "y"),
-            ("Weight", c.weight, 51, 102, "kg"),
-            ("Quetelet index", qi, 20.4, 33.3, "kg/m^2"),
-            ("Cardiac output", co, 3.6, 10.0, "L/min"),
-        ):
-            if not lo <= value <= hi:
-                warnings.warn(
-                    f"{name} {value:.3g} {unit} outside studied range ({lo}-{hi} {unit})",
-                    stacklevel=2,
-                )
 
         if model == "A":
             v1, v2, v3 = 1.29, 7.39, 57.3
@@ -138,25 +110,4 @@ class Kuipers:
             Q2 = 1.697 - 0.0156 * c.age
             Q3 = 0.691 - 0.0107 * c.age + 0.0218 * qi
 
-        self.parameters = self.Parameters(
-            V1=v1, V2=v2, V3=v3,
-            CL=CL, Q2=Q2, Q3=Q3,
-            k12=Q2 / v1, k21=Q2 / v2,
-            k13=Q3 / v1, k31=Q3 / v3,
-            k10=CL / v1,
-            QI=qi,
-        )  # fmt: skip
-        self.ode = partial(pk_3comp, p=self.parameters._asdict())
-
-    @property
-    def system_matrix(self):
-        p = self.parameters
-        k123 = p.k10 + p.k12 + p.k13
-        return np.array(
-            [
-                [ -k123,  p.k12,  p.k13,      0],
-                [ p.k21, -p.k21,      0,      0],
-                [ p.k31,      0, -p.k31,      0],
-                [ p.ke0,      0,      0, -p.ke0],
-            ]
-        )  # fmt: skip
+        self.pk = PKParameters(V1=v1, V2=v2, V3=v3, CL=CL, Q2=Q2, Q3=Q3)

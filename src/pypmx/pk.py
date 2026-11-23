@@ -112,16 +112,19 @@ class LinearPKModel:
     """Base class for linear PK models (see module docstring).
 
     Subclasses set ``units``, ``covariate_ranges`` (studied ``(low, high)``
-    per covariate, a warning is issued outside), and in ``__init__``:
-    ``covars`` (via :meth:`_set_covariates`), ``parameters`` (drug-specific
-    NamedTuple of thetas/PD values, optional) and ``pk``.
+    per covariate, a warning is issued outside), optionally ``options``
+    (names of constructor options shown by ``repr``), and in ``__init__``:
+    ``covars`` (via :meth:`_set_covariates`) and ``pk``. Models with thetas,
+    PD values or derived covariates also set ``parameters`` (a drug-specific
+    ``Parameters`` NamedTuple, declared in the subclass as
+    ``parameters: Parameters``).
     """
 
     units: ClassVar[Units]
     covariate_ranges: ClassVar[dict[str, tuple[float, float]]] = {}
+    options: ClassVar[tuple[str, ...]] = ()  # constructor options shown in repr
 
     covars: NamedTuple
-    parameters: NamedTuple | None = None
     pk: PKParameters
 
     # ---- structure -------------------------------------------------------
@@ -235,5 +238,6 @@ class LinearPKModel:
 
     def __repr__(self) -> str:
         covars = getattr(self, "covars", None)
-        args = "" if covars is None else repr(covars._asdict())
-        return f"{type(self).__name__}({args})"
+        args = [] if covars is None else [repr(covars._asdict())]
+        args += [f"{name}={getattr(self, name)!r}" for name in self.options]
+        return f"{type(self).__name__}({', '.join(args)})"

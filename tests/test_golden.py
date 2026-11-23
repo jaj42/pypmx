@@ -13,6 +13,7 @@ adds its adapter here, so the snapshot keeps guarding the numbers.
 from __future__ import annotations
 
 import json
+import warnings
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -21,15 +22,72 @@ import numpy as np
 import pytest
 
 from golden import generate
+from pypmx.drugs import (
+    AllegaertParacetamol,
+    DyckDexmedetomidine,
+    EleveldPropofol,
+    GrassinDelyleTranexamicAcid,
+    HannivoortDexmedetomidine,
+    KuipersLidocaine,
+    ZomorodiMidazolam,
+)
+from pypmx.drugs.propofol import Schnider
+from pypmx.drugs.remifentanil import Eleveld as EleveldRemifentanil
+from pypmx.drugs.remifentanil import Minto
+from pypmx.pk import LinearPKModel
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
 FILES = sorted(GOLDEN_DIR.glob("*.npz"))
 
 PARAM_RTOL = 1e-10
-SIM_RTOL, SIM_ATOL = 1e-6, 1e-9
+# The snapshots were integrated with solve_ivp (DOP853, rtol=1e-10), which is
+# only accurate to ~1e-5 relative (up to 8e-6 vs an expm reference, e.g.
+# KuipersLidocaine_B_high), while eig_advan matches expm to ~1e-14.
+SIM_RTOL, SIM_ATOL = 2e-5, 1e-9
 SIM_KEYS = ("cp", "ce", "effect", "hr", "sv", "map")
 
-ADAPTERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
+
+def linear_pk_adapter(
+    cls: Callable[..., LinearPKModel],
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Outputs of a migrated ``LinearPKModel`` for one golden case."""
+
+    def compute(meta: dict[str, Any]) -> dict[str, Any]:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # cases are inside the studied ranges
+            m = cls(meta["covars"], **meta["options"])
+        p = m.pk
+        names = ["V1", "V2", "CL", "Q2", "ke0", "k10", "k12", "k21"]
+        if p.n_cmt == 3:
+            names += ["V3", "Q3", "k13", "k31"]
+        out: dict[str, Any] = {
+            "params": {n: float(getattr(p, n)) for n in names},
+            "eigenvalues": np.sort(np.linalg.eigvals(m.system_matrix).real),
+        }
+        pred = m.simulate(meta["infu_time"], meta["infu_rate"], generate.TIME)
+        out["cp"] = pred.cp
+        if pred.ce is not None:
+            out["ce"] = pred.ce
+        return out
+
+    return compute
+
+
+ADAPTERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    name: linear_pk_adapter(cls)
+    for name, cls in {
+        "EleveldPropofol": EleveldPropofol,
+        "Schnider": Schnider,
+        "EleveldRemifentanil": EleveldRemifentanil,
+        "Minto": Minto,
+        "HannivoortDexmedetomidine": HannivoortDexmedetomidine,
+        "DyckDexmedetomidine": DyckDexmedetomidine,
+        "GrassinDelyleTranexamicAcid": GrassinDelyleTranexamicAcid,
+        "AllegaertParacetamol": AllegaertParacetamol,
+        "ZomorodiMidazolam": ZomorodiMidazolam,
+        "KuipersLidocaine": KuipersLidocaine,
+    }.items()
+}
 
 
 def load(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:

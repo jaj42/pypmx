@@ -56,11 +56,9 @@ def compute_ebe(
         a scalar fixed dose or a time series of infusion rates (e.g. ``(dose_times,
         dose_rates)`` held zero-order between dose times). Its time axis is independent of
         ``times`` — dosing times and measurement times need not coincide.
-        A ``model`` that integrates a time series can reuse
-        ``pypmx.utils.continuize_order_zero(dose_times, dose_rates)`` to build the ``Inf(t)``
-        zero-order-hold callable expected by ``pypmx.standard_models.pk_3comp``, integrate it
-        with ``scipy.integrate.solve_ivp`` (cf. ``pypmx.ode.simulate_pkpd``) and evaluate the
-        solution at ``times``.
+        A ``model`` built on a ``pypmx.pk.LinearPKModel`` can pass such a series
+        straight to its ``simulate(dose_times, dose_rates, times)``, which solves the
+        piecewise-constant infusion exactly and returns the prediction at ``times``.
     theta : array_like
         Population (fixed-effect) parameters.
     omega : ndarray

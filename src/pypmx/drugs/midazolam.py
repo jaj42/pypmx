@@ -1,29 +1,18 @@
-import warnings
-from functools import partial
-from math import nan
 from collections.abc import Mapping
-from typing import Any, NamedTuple
-
-import numpy as np
+from typing import Any, ClassVar, NamedTuple
 
 from pypmx.leanbodymass import dubois
-from pypmx.standard_models import pk_3comp
-
-
-class Units(NamedTuple):
-    time: str
-    cp: str
-    effect: str | None = None
+from pypmx.pk import LinearPKModel, PKParameters, Units
 
 
 class Covariates(NamedTuple):
-    age: int = 64
+    age: float = 64
     weight: float = 86
     height: float = 175
     sex: str = "m"
 
 
-class Zomorodi:
+class Zomorodi(LinearPKModel):
     """3 compartment intravenous midazolam PK model (no effect site)
 
     Units:
@@ -61,72 +50,34 @@ class Zomorodi:
     No effect site (the PD paper is not used), so ke0 = 0.
     """
 
-    units: Units = Units(time="min", cp="ng/ml")
+    units: ClassVar[Units] = Units(time="min", cp="ng/ml")
+    covariate_ranges: ClassVar[dict[str, tuple[float, float]]] = {
+        "age": (45, 80),  # approximate: mean +/- 2 SD
+        "weight": (55, 115),
+    }
+    options: ClassVar[tuple[str, ...]] = ("bsa_adjusted",)
 
     class Parameters(NamedTuple):
-        V1: float = nan
-        V2: float = nan
-        V3: float = nan
-        CL: float = nan
-        Q2: float = nan
-        Q3: float = nan
-        k12: float = nan
-        k21: float = nan
-        k13: float = nan
-        k31: float = nan
-        k10: float = nan
-        ke0: float = 0
-        BSA: float = nan
+        BSA: float  # derived covariate (m^2, Du Bois)
 
-    def __repr__(self):
-        return f"Midazolam Zomorodi ({self.covars}, bsa_adjusted={self.bsa_adjusted})"
+    parameters: Parameters
 
     def __init__(
         self,
         covars: Mapping[str, Any] | None = None,
         bsa_adjusted: bool = False,
     ):
-        self.covars = Covariates(**covars) if covars is not None else Covariates()
         self.bsa_adjusted = bsa_adjusted
-        c = self.covars
-        if not 45 <= c.age <= 80:
-            warnings.warn(
-                f"Age {c.age} y outside approximate studied range (45-80 y)",
-                stacklevel=2,
-            )
-        if not 55 <= c.weight <= 115:
-            warnings.warn(
-                f"Weight {c.weight} kg outside approximate studied range (55-115 kg)",
-                stacklevel=2,
-            )
-
+        c = self._set_covariates(covars, Covariates)
         bsa = dubois(c.height, c.weight)
+        self.parameters = self.Parameters(BSA=bsa)
         if bsa_adjusted:
-            v1, v2, v3 = 33.0, 3.32 + 32.1 * bsa, 365.0
-            CL, Q2, Q3 = 0.0889 + 0.151 * bsa, 0.622, 0.264
+            self.pk = PKParameters(
+                V1=33.0, V2=3.32 + 32.1 * bsa, V3=365.0,
+                CL=0.0889 + 0.151 * bsa, Q2=0.622, Q3=0.264,
+            )  # fmt: skip
         else:
-            v1, v2, v3 = 32.2, 53.0, 245.0
-            CL, Q2, Q3 = 0.43, 0.56, 0.39
-
-        self.parameters = self.Parameters(
-            V1=v1, V2=v2, V3=v3,
-            CL=CL, Q2=Q2, Q3=Q3,
-            k12=Q2 / v1, k21=Q2 / v2,
-            k13=Q3 / v1, k31=Q3 / v3,
-            k10=CL / v1,
-            BSA=bsa,
-        )  # fmt: skip
-        self.ode = partial(pk_3comp, p=self.parameters._asdict())
-
-    @property
-    def system_matrix(self):
-        p = self.parameters
-        k123 = p.k10 + p.k12 + p.k13
-        return np.array(
-            [
-                [ -k123,  p.k12,  p.k13,      0],
-                [ p.k21, -p.k21,      0,      0],
-                [ p.k31,      0, -p.k31,      0],
-                [ p.ke0,      0,      0, -p.ke0],
-            ]
-        )  # fmt: skip
+            self.pk = PKParameters(
+                V1=32.2, V2=53.0, V3=245.0,
+                CL=0.43, Q2=0.56, Q3=0.39,
+            )  # fmt: skip

@@ -1,23 +1,13 @@
 import warnings
-from functools import partial
-from math import nan
 from collections.abc import Mapping
-from typing import Any, NamedTuple
-
-import numpy as np
+from typing import Any, ClassVar, NamedTuple
 
 from pypmx.leanbodymass import janmahasation
-from pypmx.standard_models import pk_3comp
-
-
-class Units(NamedTuple):
-    time: str
-    cp: str
-    effect: str | None = None
+from pypmx.pk import LinearPKModel, PKParameters, Units
 
 
 class Covariates(NamedTuple):
-    age: int = 25
+    age: float = 25
     weight: float = 70
     height: float = 170
     sex: str = "m"
@@ -33,7 +23,7 @@ SETTINGS = {
 }
 
 
-class Allegaert:
+class Allegaert(LinearPKModel):
     """3 compartment intravenous paracetamol PK model (no effect site)
 
     Units:
@@ -82,21 +72,14 @@ class Allegaert:
     No effect site, so ke0 = 0.
     """
 
-    units: Units = Units(time="min", cp="mg/L")
+    units: ClassVar[Units] = Units(time="min", cp="mg/L")
+    covariate_ranges: ClassVar[dict[str, tuple[float, float]]] = {
+        "weight": (49.2, 120),
+        "age": (19, 88.5),
+    }
+    options: ClassVar[tuple[str, ...]] = ("setting",)
 
     class Parameters(NamedTuple):
-        V1: float = nan
-        V2: float = nan
-        V3: float = nan
-        Q2: float = nan
-        Q3: float = nan
-        CL: float = nan
-        k12: float = nan
-        k21: float = nan
-        k13: float = nan
-        k31: float = nan
-        k10: float = nan
-        ke0: float = 0
         # Reference values (per 70 kg), converted to L/min
         clref: float = 16.7 / 60
         q2ref: float = 67.3 / 60
@@ -109,8 +92,7 @@ class Allegaert:
         fage_v2: float = 0.838
         weight_ref: float = 70
 
-    def __repr__(self):
-        return f"Paracetamol Allegaert ({self.covars}, setting={self.setting})"
+    parameters: Parameters
 
     def __init__(
         self,
@@ -121,22 +103,12 @@ class Allegaert:
             raise ValueError(
                 f"Unknown setting {setting!r}, expected one of {list(SETTINGS)}"
             )
-        self.covars = Covariates(**covars) if covars is not None else Covariates()
         self.setting = setting
-        c = self.covars
-        if not 49.2 <= c.weight <= 120:
-            warnings.warn(
-                f"Weight {c.weight} kg outside studied range (49.2-120 kg)",
-                stacklevel=2,
-            )
-        if not 19 <= c.age <= 88.5:
-            warnings.warn(
-                f"Age {c.age} y outside studied range (19-88.5 y)", stacklevel=2
-            )
+        c = self._set_covariates(covars, Covariates)
         if setting == "pregnancy" and c.sex == "m":
             warnings.warn("Setting 'pregnancy' used with sex 'm'", stacklevel=2)
 
-        p = self.Parameters()
+        p = self.parameters = self.Parameters()
         ffm = janmahasation(c.height, c.weight, c.sex)
         nfm_cl = ffm + p.ffat_cl * (c.weight - ffm)
         nfm_vol = ffm + p.ffat_vol * (c.weight - ffm)
@@ -146,31 +118,11 @@ class Allegaert:
         fset_cl, fset_v2 = SETTINGS[setting]
         fage_v2 = p.fage_v2 if c.age > 60 else 1.0
 
-        v1 = p.v1ref * f_vol
-        v2 = p.v2ref * f_vol * fage_v2 * fset_v2
-        v3 = p.v3ref * f_vol
-        CL = p.clref * f_cl * fset_cl
-        Q2 = p.q2ref * f_cl
-        Q3 = p.q3ref * f_cl
-
-        self.parameters = p._replace(
-            V1=v1, V2=v2, V3=v3,
-            Q2=Q2, Q3=Q3, CL=CL,
-            k12=Q2 / v1, k21=Q2 / v2,
-            k13=Q3 / v1, k31=Q3 / v3,
-            k10=CL / v1,
-        )  # fmt: skip
-        self.ode = partial(pk_3comp, p=self.parameters._asdict())
-
-    @property
-    def system_matrix(self):
-        p = self.parameters
-        k123 = p.k10 + p.k12 + p.k13
-        return np.array(
-            [
-                [ -k123,  p.k12,  p.k13,      0],
-                [ p.k21, -p.k21,      0,      0],
-                [ p.k31,      0, -p.k31,      0],
-                [ p.ke0,      0,      0, -p.ke0],
-            ]
-        )  # fmt: skip
+        self.pk = PKParameters(
+            V1=p.v1ref * f_vol,
+            V2=p.v2ref * f_vol * fage_v2 * fset_v2,
+            V3=p.v3ref * f_vol,
+            CL=p.clref * f_cl * fset_cl,
+            Q2=p.q2ref * f_cl,
+            Q3=p.q3ref * f_cl,
+        )

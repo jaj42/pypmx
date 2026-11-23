@@ -4,19 +4,10 @@ import numpy as np
 import pytest
 from scipy.integrate import solve_ivp
 
-from pypmx import eigen
 from pypmx.drugs import AllegaertParacetamol as Model
 from pypmx.leanbodymass import janmahasation
 
 PK_NAMES = ("V1", "V2", "V3", "Q2", "Q3", "CL", "k12", "k21", "k13", "k31", "k10")
-
-
-def _unit_bolus(m):
-    """Input vector of a unit bolus into the central compartment (concentration
-    space: the bolus raises C1 by 1/V1)."""
-    B = np.zeros(m.system_matrix.shape[0])
-    B[0] = 1 / m.parameters.V1
-    return B
 
 
 def simulate_q6h(model, t_end, dose=1000, tau=360, t_inf=15, dt=0.1):
@@ -24,10 +15,8 @@ def simulate_q6h(model, t_end, dose=1000, tau=360, t_inf=15, dt=0.1):
         return dose / t_inf if (t % tau) < t_inf else 0.0
 
     t = np.arange(0, t_end + dt, dt)
-    sol = solve_ivp(
-        model.ode, (0, t_end), [0, 0, 0, 0], t_eval=t, args=(inf,), max_step=1
-    )
-    return t, sol.y[0] / model.parameters.V1
+    sol = solve_ivp(model.ode, (0, t_end), [0, 0, 0], t_eval=t, args=(inf,), max_step=1)
+    return t, sol.y[0] / model.pk.V1
 
 
 @pytest.mark.parametrize(
@@ -44,16 +33,16 @@ def simulate_q6h(model, t_end, dose=1000, tau=360, t_inf=15, dt=0.1):
 def test_parameters_finite_positive(covars, setting):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        p = Model(covars, setting=setting).parameters
+        p = Model(covars, setting=setting).pk
     for name in PK_NAMES:
         value = getattr(p, name)
         assert np.isfinite(value) and value > 0, name
-    assert p.ke0 == 0
+    assert p.ke0 == 0 and p.n_cmt == 3
 
 
 def test_size_scaling_nfm():
     c = {"weight": 90, "height": 175, "sex": "m", "age": 40}
-    p = Model(c).parameters
+    p = Model(c).pk
     ffm = janmahasation(175, 90, "m")
     nfm_vol = ffm + 0.778 * (90 - ffm)
     # Ffat_CL = 1 -> TBW
@@ -84,8 +73,8 @@ def test_janmahasation_matches_paper_whs():
 )
 def test_setting_factors(setting, f_cl, f_v2):
     c = {"sex": "f", "age": 30}
-    ref = Model(c).parameters
-    p = Model(c, setting=setting).parameters
+    ref = Model(c).pk
+    p = Model(c, setting=setting).pk
     assert p.CL == pytest.approx(ref.CL * f_cl)
     assert p.V2 == pytest.approx(ref.V2 * f_v2)
     for name in ("V1", "V3", "Q2", "Q3"):
@@ -93,8 +82,8 @@ def test_setting_factors(setting, f_cl, f_v2):
 
 
 def test_age_factor_on_v2():
-    young = Model({"age": 60}).parameters
-    old = Model({"age": 61}).parameters
+    young = Model({"age": 60}).pk
+    old = Model({"age": 61}).pk
     assert old.V2 == pytest.approx(young.V2 * 0.838)
     assert old.CL == pytest.approx(young.CL)
 
@@ -109,30 +98,28 @@ def test_warnings():
         warnings.simplefilter("error")
         Model()
         Model({"sex": "f"}, setting="pregnancy")
-    with pytest.warns(UserWarning, match="Weight"):
+    with pytest.warns(UserWarning, match="weight"):
         Model({"weight": 140})
-    with pytest.warns(UserWarning, match="Age"):
+    with pytest.warns(UserWarning, match="age"):
         Model({"age": 18})
     with pytest.warns(UserWarning, match="pregnancy"):
         Model({"sex": "m"}, setting="pregnancy")
 
 
-def test_ode_bolus_matches_eigen_impulse_response():
+def test_simulate_bolus_matches_solve_ivp():
     m = Model({"age": 68, "weight": 80, "height": 180}, setting="icu")
-    p = m.parameters
-    modes = eigen.eigendecomposition(m.system_matrix, _unit_bolus(m))
     t = np.linspace(0, 1440, 1441)
-    cp_eigen = eigen.calculate_impulse_response(modes, t)
+    cp = m.simulate([0.0], [0.0], t, y0=[1.0, 0, 0]).cp
     sol = solve_ivp(
         m.ode,
         (0, 1440),
-        [1.0, 0, 0, 0],
+        [1.0, 0, 0],
         t_eval=t,
         args=(lambda t: 0.0,),
         rtol=1e-10,
         atol=1e-12,
     )
-    np.testing.assert_allclose(sol.y[0] / p.V1, cp_eigen, rtol=1e-6, atol=1e-9)
+    np.testing.assert_allclose(sol.y[0] / m.pk.V1, cp, rtol=1e-6, atol=1e-9)
 
 
 def test_1g_q6h_healthy_volunteer():
