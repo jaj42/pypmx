@@ -1,7 +1,8 @@
 import warnings
 from functools import partial
 from math import nan
-from typing import NamedTuple
+from collections.abc import Mapping
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -113,7 +114,7 @@ class Allegaert:
 
     def __init__(
         self,
-        covars: dict[str, int | float | str] | None = None,
+        covars: Mapping[str, Any] | None = None,
         setting: str = "none",
     ):
         if setting not in SETTINGS:

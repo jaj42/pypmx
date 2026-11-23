@@ -29,4 +29,20 @@ project-includes = [
 [dependency-groups]
 dev = [
     "pytest>=9.2.0",
+    "ty>=0.0.108",
+]
+
+[tool.ty.environment]
+python-version = "3.10"
+root = ["src", "tests"]
+
+[tool.ty.src]
+# Legacy modules, removed or rewritten during the PK API unification (plan.md
+# steps 3-5). Do not add new files here.
+exclude = [
+    "src/pypmx/ode.py",
+    "src/pypmx/drugs/alfentanil.py",
+    "src/pypmx/drugs/cefazolin.py",
+    "src/pypmx/drugs/noradrenaline_old.py",
+    "src/pypmx/drugs/sufentanil.py",
 ]

@@ -1,11 +1,13 @@
 from collections.abc import Callable
 from functools import cached_property
 from math import exp, log, nan
-from typing import NamedTuple, Union
+from typing import NamedTuple
 
 import numpy as np
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 from scipy.integrate import solve_ivp
+
+from pypmx.utils import filter_valid
 
 
 class State(NamedTuple):
@@ -15,9 +17,9 @@ class State(NamedTuple):
 
 
 class State_array(NamedTuple):
-    HRi: ArrayLike
-    SVi: ArrayLike
-    TPR: ArrayLike
+    HRi: NDArray
+    SVi: NDArray
+    TPR: NDArray
 
 
 class Units(NamedTuple):
@@ -71,18 +73,6 @@ class Parameters(NamedTuple):
     kin_hr: float = nan
     emax_prop_sv: float = nan
     base_map: float = nan
-
-
-def filter_valid(
-    data: Union[dict[str, float], NamedTuple], typeclass: NamedTuple
-) -> dict[str, float]:
-    valid_fields = set(typeclass._fields)
-    try:
-        data_fields = data._fields
-        return {k: getattr(data, k) for k in set(data_fields) & valid_fields}
-    except AttributeError:
-        data_fields = data.keys()
-        return {k: data[k] for k in set(data_fields) & valid_fields}
 
 
 class PropofolRemifentanil:
@@ -263,7 +253,7 @@ class PropofolRemifentanil:
 
         return ddt_HRi, ddt_SVi, ddt_TPR
 
-    def solve_ode(self, t) -> tuple[State_array, ArrayLike]:
+    def solve_ode(self, t) -> tuple[State_array, NDArray]:
         t_span = [min(t), max(t)]
         y0 = list(self._y0)
         res = solve_ivp(
@@ -274,9 +264,7 @@ class PropofolRemifentanil:
         )
         return State_array(HRi=res.y[0, :], SVi=res.y[1, :], TPR=res.y[2, :]), res.t
 
-    def __call__(
-        self, t: ArrayLike
-    ) -> tuple[ArrayLike, ArrayLike, ArrayLike, ArrayLike]:
+    def __call__(self, t: ArrayLike) -> tuple[NDArray, NDArray, NDArray, NDArray]:
         p = self.parameters
 
         # Use new time points because ODE solver may return less points when it fails evaluation

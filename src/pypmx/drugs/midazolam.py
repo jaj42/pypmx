@@ -1,7 +1,8 @@
 import warnings
 from functools import partial
 from math import nan
-from typing import NamedTuple
+from collections.abc import Mapping
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -82,7 +83,7 @@ class Zomorodi:
 
     def __init__(
         self,
-        covars: dict[str, int | float | str] | None = None,
+        covars: Mapping[str, Any] | None = None,
         bsa_adjusted: bool = False,
     ):
         self.covars = Covariates(**covars) if covars is not None else Covariates()

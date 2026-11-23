@@ -1,8 +1,11 @@
-from typing import List, Tuple
+from typing import Tuple
 import dataclasses
 from collections import namedtuple
 
 import numpy as np
+from numpy.typing import NDArray
+
+FloatArray = NDArray[np.float64]
 
 UDFs = namedtuple("UDFs", ["p_udf", "e_udf"])
 Coefs = namedtuple("Coefs", ["p_coef", "e_coef"])
@@ -61,7 +64,7 @@ def calculate_lambdas(parameters):
     return lambdas
 
 
-def calculate_coefficients(parameters: Parameters, lambdas: List[float]):
+def calculate_coefficients(parameters: Parameters, lambdas: FloatArray):
     k21 = parameters.k21
     k31 = parameters.k31
     ke0 = parameters.ke0
@@ -120,7 +123,7 @@ def calculate_coefficients(parameters: Parameters, lambdas: List[float]):
 
 
 def calculate_udfs(
-    parameters: Parameters, lambdas: List[float], delta_seconds: int
+    parameters: Parameters, lambdas: FloatArray, delta_seconds: int
 ) -> Tuple[UDFs, Coefs, int]:
     """Calculate Unit Disposition Functions
     Needs parameters in s-1
@@ -166,9 +169,9 @@ def calculate_udfs(
 
 
 def model(
-    Ap: List[float],
-    Ae: List[float],
-    lambdas: List[float],
+    Ap: FloatArray,
+    Ae: FloatArray,
+    lambdas: FloatArray,
     udfs: UDFs,
     coefs: Coefs,
     desired: float,
@@ -264,10 +267,10 @@ def model(
 
 
 def virtual_model(
-    A: List[float],
+    A: FloatArray,
     t: int,
     peak_time: int,
-    lambdas: List[float],
+    lambdas: FloatArray,
     target_effect: bool,
 ) -> float:
     """
@@ -291,10 +294,10 @@ def virtual_model(
 def find_peak(
     current_time: int,
     rate: float,
-    Ae: List[float],
+    Ae: FloatArray,
     peak_time: int,
-    lambdas: List[float],
-    e_udf: List[float],
+    lambdas: FloatArray,
+    e_udf: FloatArray,
     delta_seconds: int,
 ) -> int:
     """Find the time when effect site concentration will peak"""
@@ -338,9 +341,9 @@ def find_peak(
 
 
 def update(
-    A: List[float],
-    lambdas: List[float],
-    coefs: List[float],
+    A: FloatArray,
+    lambdas: FloatArray,
+    coefs: FloatArray,
     rate: float,  # rate in units/second
     dt: int,  # time in seconds
 ):

@@ -1,13 +1,12 @@
-import bisect
-from datetime import timedelta
+from __future__ import annotations
+
 from importlib import resources
-from math import floor, log10, nan
-from typing import Callable, Protocol
+from math import nan
+from collections.abc import Mapping
+from typing import Any, Callable, NamedTuple, Protocol
 
 import numpy as np
-import pandas as pd
 from numpy.typing import NDArray
-from scipy import signal
 
 from pypmx import assets
 
@@ -25,6 +24,7 @@ def load_units():
 
 
 def calculate_drug_dose(data, molar_mass=None):
+    Q_ = load_units().Quantity
     rate = Q_(float(data["rate"]), data["rate_unit"])
     volume = Q_(float(data["volume"]), data["volume_unit"])
     mass_rate = dose = mol_rate = mol_dose = None
@@ -78,3 +78,12 @@ def value_change_indices(data: NDArray):
 
 class ConcentrationFunction(Protocol):
     def __call__(self, t: float, /) -> float: ...
+
+
+def filter_valid(
+    data: Mapping[str, Any] | NamedTuple, typeclass: type[NamedTuple]
+) -> dict[str, Any]:
+    """Keep only the entries of `data` that are fields of `typeclass`."""
+    valid_fields = set(typeclass._fields)
+    items = dict(data) if isinstance(data, Mapping) else data._asdict()
+    return {k: v for k, v in items.items() if k in valid_fields}

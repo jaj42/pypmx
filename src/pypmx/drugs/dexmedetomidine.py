@@ -1,6 +1,7 @@
 from functools import partial
 from math import nan
-from typing import NamedTuple
+from collections.abc import Mapping
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -80,7 +81,7 @@ class Hannivoort:
 
     def __init__(
         self,
-        covars: dict[str, int | float | str] | None = None,
+        covars: Mapping[str, Any] | None = None,
         effect: str = "moaas",
     ):
         if effect not in COLIN_EFFECTS:
@@ -159,7 +160,7 @@ class Dyck:
     def __repr__(self):
         return f"Dexmedetomidine Dyck ({self.covars})"
 
-    def __init__(self, covars: dict[str, int | float | str] | None = None):
+    def __init__(self, covars: Mapping[str, Any] | None = None):
         self.covars = Covariates(**covars) if covars is not None else Covariates()
         c = self.covars
 

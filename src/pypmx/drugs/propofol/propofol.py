@@ -1,10 +1,10 @@
 import warnings
 from functools import partial
 from math import exp, nan
-from typing import NamedTuple
+from collections.abc import Mapping
+from typing import Any, NamedTuple
 
 import numpy as np
-from scipy.special import expit
 
 from pypmx import leanbodymass
 from pypmx.standard_models import pk_3comp
@@ -117,7 +117,7 @@ class Eleveld:
     def __repr__(self):
         return f"Propofol Eleveld ({self.covars})"
 
-    def __init__(self, covars: dict[str, int | float | str] | None = None):
+    def __init__(self, covars: Mapping[str, Any] | None = None):
         self.covars = Covariates(**covars) if covars is not None else Covariates()
         self.parameters = self.Parameters()
         p = self.parameters
@@ -219,7 +219,7 @@ class Schnider:
         k10: float = nan
         ke0: float = nan
 
-    def __init__(self, covars: Covariates):
+    def __init__(self, covars: Mapping[str, Any] | None = None):
         self.covars = Covariates(**covars) if covars is not None else Covariates()
         c = self.covars
         lean_body_mass = leanbodymass.james(c.height, c.weight, c.sex)

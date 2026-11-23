@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def eigendecomposition(S, V1, ke0: float = None):
+def eigendecomposition(S, V1, ke0: float | None = None):
     # Eigenvalue decomposition
     eigvals, eigvecs = np.linalg.eig(S)
 

@@ -1,11 +1,12 @@
-from collections.abc import Mapping
 from functools import cached_property
 from math import exp, log, nan
-from typing import Any, NamedTuple, Protocol, TypeVar
+from typing import Any, NamedTuple, Protocol
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.integrate import solve_ivp
+
+from pypmx.utils import filter_valid
 
 
 class ConcentrationFunction(Protocol):
@@ -77,18 +78,6 @@ class Parameters(NamedTuple):
     kin_hr: float = nan
     emax_prop_sv: float = nan
     base_map: float = nan
-
-
-T = TypeVar("T", bound=NamedTuple)
-
-
-def filter_valid(
-    data: Mapping[str, float] | tuple, typeclass: type[T]
-) -> dict[str, float]:
-    valid_fields = set(typeclass._fields)
-    if hasattr(data, "_fields"):
-        return {k: getattr(data, k) for k in set(data._fields) & valid_fields}
-    return {k: data[k] for k in set(data.keys()) & valid_fields}
 
 
 class PropofolRemifentanil:
