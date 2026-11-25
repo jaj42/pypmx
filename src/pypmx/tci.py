@@ -1,323 +1,246 @@
-"""STANPUMP-style target-controlled infusion (TCI).
+"""Target-controlled infusion (TCI) on the modal solution of the PK system.
 
-The controller works on a modal state: the plasma (``Ap``) and effect-site
-(``Ae``) concentrations are each a sum of exponential modes, advanced every
-``delta_seconds`` with :func:`update`. The modes come from the unified PK model
-(:class:`pypmx.pk.LinearPKModel` or :class:`pypmx.pk.PKParameters`) through
-:func:`pypmx.eigen.eigendecomposition`, ordered STANPUMP-style (PK modes fastest
-first, ke0 last).
+Every ``delta_seconds`` the controller chooses the constant rate for the next
+step. It relies on the superposition principle: the concentration ``s`` seconds
+from now is the *free course* of the current state (no infusion) plus the rate
+times the *unit disposition function* (UDF), the response to 1/s for one step:
 
-PK models are in minutes; the controller runs in **seconds**. The conversion
-happens here only (:func:`decompose`): lambdas are in s⁻¹ and rates in
-amount/s.
+    C(s) = C_free(s) + rate·udf(s)
+
+Both come from the eigendecomposition of the system matrix
+(:mod:`pypmx.eigen`), so any linear model works and both are continuous in
+``s``; no per-structure closed forms and no per-second tables are needed.
+
+* **Plasma target**: aim at the end of the step,
+  ``rate = (target - Cp_free(δ)) / udf_cp(δ)``.
+* **Effect-site target**: aim at the *peak* of Ce, which depends on the rate.
+  The peak time ``t`` is the fixed point of
+  ``t ↦ argmax_s Ce_free(s) + rate(t)·udf_ce(s)`` with
+  ``rate(t) = (target - Ce_free(t)) / udf_ce(t)``; the argmax is found with
+  Brent's method (``minimize_scalar``), the fixed point with
+  ``scipy.optimize.fixed_point``. As in STANPUMP, the controller switches to
+  plasma targeting once Ce is within ``plasma_switch`` of the target, which
+  removes the rate wobble caused by discrete steps.
+
+Endogenous production (``model.forcing``) is part of the free course, and the
+body starts at ``model.steady_state()``. With an infusion lag (``model.lag``)
+a rate chosen now only enters the body ``lag`` later, so the controller plans
+from the state at ``now + lag``, which earlier decisions fully determine.
+
+PK models are in minutes; the controller runs in **seconds** (rates in
+amount/s), the conversion happens in :func:`_controller_system` only.
+:mod:`pypmx.stanpump_tci` is the reference port of the original algorithm.
 """
 
 from __future__ import annotations
 
-import warnings
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.optimize import fixed_point, minimize_scalar
 
-from pypmx.eigen import Modes, eigendecomposition
+from pypmx.eigen import eigendecomposition, phi
 from pypmx.pk import LinearPKModel, PKParameters, system_matrix
 
 FloatArray = NDArray[np.float64]
 
 SECONDS_PER_MINUTE = 60.0
+PEAK_SEARCH_LIMIT = 45 * 60.0  # s, the unit effect-site peak must come earlier
+PEAK_TIME_TOLERANCE = 1e-3  # s, for the argmax (Ce is flat at its peak)
+FIXED_POINT_TOLERANCE = 1e-6  # relative, on the peak time
 
 
-class UDFs(NamedTuple):
-    """Unit disposition functions, one value per second."""
+class TCIResult(NamedTuple):
+    """Closed-loop run, one row per step.
 
-    p_udf: FloatArray  # Cp after a 1/s infusion from t = 0
-    e_udf: FloatArray  # Ce after a 1/s infusion for delta_seconds
-
-
-class Coefs(NamedTuple):
-    """Steady-state concentration per mode for a 1/s infusion."""
-
-    p_coef: FloatArray
-    e_coef: FloatArray
-
-
-class TCISetup(NamedTuple):
-    """Everything :func:`model` needs, from :func:`prepare`."""
-
-    lambdas: FloatArray  # s⁻¹, PK modes fastest first, ke0 last
-    coefs: Coefs
-    udfs: UDFs
-    peak_time: int | None  # s, time to peak Ce after a delta_seconds bolus
-    delta_seconds: int
-
-
-def stanpump_order(modes: Modes, ke0: float) -> Modes:
-    """Reorder modes STANPUMP-style: PK modes (fastest first), then ke0 last.
-
-    The ke0 mode is the one whose decay constant is closest to ``ke0``.
+    ``rate[k]`` is chosen at ``t[k]`` and runs for one step; it enters the
+    body ``lag`` seconds later, so ``cp[k]``/``ce[k]`` are the concentrations
+    at ``t[k] + lag + delta_seconds``.
     """
-    lambdas = modes.lambdas
-    ke0_idx = int(np.argmin(np.abs(lambdas - ke0)))
-    pk_idx = [i for i in np.argsort(-lambdas.real) if i != ke0_idx]
-    order = np.array([*pk_idx, ke0_idx])
-    return Modes(
-        lambdas[order],
-        modes.eigvecs[:, order],
-        modes.alpha_B[order],
-        modes.alpha_f[order],
-        modes.y0_mod[:, order],
-    )
+
+    t: FloatArray  # s, decision times
+    rate: FloatArray  # amount/s
+    cp: FloatArray
+    ce: FloatArray | None
 
 
-def _pk_parameters(model: LinearPKModel | PKParameters) -> PKParameters:
+class _System(NamedTuple):
+    pk: PKParameters
+    S: FloatArray  # s⁻¹
+    f: FloatArray  # amount/s
+    lag: float  # s
+    x0: FloatArray  # state before any infusion
+
+
+def _controller_system(model: LinearPKModel | PKParameters) -> _System:
+    """The model's ``x' = S·x + B·r + f``, converted to seconds."""
     if isinstance(model, PKParameters):
-        return model
+        n = model.n_cmt + int(model.has_effect_site)
+        S = system_matrix(model) / SECONDS_PER_MINUTE
+        return _System(model, S, np.zeros(n), 0.0, np.zeros(n))
     if model.units.time != "min":
         raise ValueError(f"TCI expects a model in minutes, got {model.units.time!r}")
-    return model.pk
-
-
-def decompose(model: LinearPKModel | PKParameters) -> tuple[FloatArray, Coefs]:
-    """Lambdas (s⁻¹) and per-mode coefficients for the TCI controller.
-
-    ``model`` is a :class:`LinearPKModel` or :class:`PKParameters` in minutes.
-    There is one mode per PK compartment plus one for ke0 when the model has an
-    effect site. Without an effect site ``e_coef`` is all zeros.
-    """
-    p = _pk_parameters(model)
-    S = system_matrix(p) / SECONDS_PER_MINUTE
-    B = np.zeros(S.shape[0])
-    B[0] = 1.0
-    modes = eigendecomposition(S, B)
-    if p.has_effect_site:
-        modes = stanpump_order(modes, p.ke0 / SECONDS_PER_MINUTE)
-    else:
-        modes = Modes(*(m[..., ::-1] for m in modes))  # fastest first
-    # Step response of state j: Σ_i v_ji·α_i/λ_i·(1 - e^{-λ_i·t}).
-    weights = modes.eigvecs * (modes.alpha_B / modes.lambdas)
-    p_coef = weights[0] / p.V1
-    if p.has_effect_site:
-        p_coef[-1] = 0.0  # the ke0 mode does not feed back into the PK block
-        e_coef = weights[-1]
-    else:
-        e_coef = np.zeros_like(p_coef)
-    return modes.lambdas, Coefs(p_coef, e_coef)
-
-
-def calculate_udfs(
-    lambdas: FloatArray, coefs: Coefs, delta_seconds: int
-) -> tuple[UDFs, int | None]:
-    """Unit disposition functions (s⁻¹ lambdas) and the effect-site peak time.
-
-    ``peak_time`` is ``None`` when the model has no effect site.
-    """
-    p_udf = np.zeros(200)
-    e_udf = np.zeros(45 * 60)  # 45 minutes
-
-    decay = np.exp(-lambdas)
-
-    # Plasma UDF (step response)
-    A = np.zeros(len(lambdas))
-    for i in range(len(p_udf)):
-        p_udf[i] = np.sum(A)
-        A = A * decay + coefs.p_coef * (1 - decay)
-
-    if not np.any(coefs.e_coef):
-        return UDFs(p_udf, e_udf), None
-
-    # Effect-site UDF until its peak: 1/s for delta_seconds, then washout.
-    A = np.zeros(len(lambdas))
-    for i in range(delta_seconds):
-        e_udf[i] = np.sum(A)
-        A = A * decay + coefs.e_coef * (1 - decay)
-    e_udf[delta_seconds] = np.sum(A)
-
-    prior = e_udf[delta_seconds]
-    for i in range(delta_seconds + 1, len(e_udf)):
-        A = A * decay
-        e_udf[i] = np.sum(A)
-        if prior >= e_udf[i]:
-            break
-        prior = e_udf[i]
-    else:
-        warnings.warn("e_udf: no effect-site peak within 45 min", stacklevel=2)
-    return UDFs(p_udf, e_udf), i - 1
-
-
-def prepare(model: LinearPKModel | PKParameters, delta_seconds: int = 10) -> TCISetup:
-    """Lambdas, coefficients, UDFs and peak time of a PK model, for :func:`model`."""
-    lambdas, coefs = decompose(model)
-    udfs, peak_time = calculate_udfs(lambdas, coefs, delta_seconds)
-    return TCISetup(lambdas, coefs, udfs, peak_time, delta_seconds)
-
-
-def model(
-    Ap: FloatArray,
-    Ae: FloatArray,
-    lambdas: FloatArray,
-    udfs: UDFs,
-    coefs: Coefs,
-    desired: float,
-    peak_time: int | None,
-    delta_seconds: int,
-    target_effect: bool = True,
-) -> float:
-    """
-    Calculate required infusion rate to achieve desired concentration
-    Returns rate in units/second
-    """
-    p_udf = udfs.p_udf
-    e_udf = udfs.e_udf
-    first_dose = Ap[0] == 0
-
-    if target_effect and peak_time is None:
-        raise ValueError("Effect-site targeting needs a model with an effect site")
-
-    # Check if we should use plasma targeting or are very close to target
-    target_delta_threshold = 0.05  # 5% close to target -> switch to plasma targetting
-    close_to_target = abs(desired - np.sum(Ae)) < desired * target_delta_threshold
-    if not target_effect or close_to_target:
-        # Plasma targeting mode
-        if first_dose:
-            return desired / p_udf[delta_seconds]
-        result = virtual_model(Ap, delta_seconds, peak_time, lambdas, False)
-        if desired > result:
-            return (desired - result) / p_udf[delta_seconds]
-        return 0.0
-
-    # Effect site targeting mode
-    assert peak_time is not None
-    if first_dose:
-        return desired / e_udf[peak_time]
-
-    # Check if pump should be off (already at/above target)
-    if virtual_model(Ae, delta_seconds, peak_time, lambdas, True) > desired:
-        return 0.0
-
-    # Set convergence criteria
-    min_dif = desired * 0.0000001  # High precision for simulation
-
-    # Initial settings
-    temp_peak = peak_time
-    if temp_peak <= delta_seconds:
-        temp_peak = delta_seconds + 1
-
-    # Initial rate calculation
-    rate = (desired - virtual_model(Ae, temp_peak, peak_time, lambdas, True)) / e_udf[
-        temp_peak
-    ]
-
-    temp_peak = find_peak(temp_peak, rate, Ae, peak_time, lambdas, e_udf, delta_seconds)
-    current = (
-        virtual_model(Ae, temp_peak, peak_time, lambdas, True) + e_udf[temp_peak] * rate
+    return _System(
+        model.pk,
+        model.system_matrix / SECONDS_PER_MINUTE,
+        model.forcing / SECONDS_PER_MINUTE,
+        model.lag * SECONDS_PER_MINUTE,
+        model.steady_state(),
     )
 
-    # Iterate until convergence
-    iteration_count = 0
-    max_iterations = 5000  # Safety limit
 
-    while abs(current - desired) > min_dif and iteration_count < max_iterations:
-        rate = (
-            desired - virtual_model(Ae, temp_peak, peak_time, lambdas, True)
-        ) / e_udf[temp_peak]
+class TCI:
+    """Target-controlled infusion of a linear PK model (see module docstring).
 
-        temp_peak = find_peak(
-            temp_peak, rate, Ae, peak_time, lambdas, e_udf, delta_seconds
-        )
-        current = (
-            virtual_model(Ae, temp_peak, peak_time, lambdas, True)
-            + e_udf[temp_peak] * rate
-        )
-        iteration_count += 1
-
-    if iteration_count >= max_iterations:
-        warnings.warn(
-            f"TCI model did not converge after {max_iterations} iterations",
-            stacklevel=2,
-        )
-
-    # Handle very small rates near peak time
-    # XXX Maybe this is not needed here but should be handled by the pump rate resolution
-    if rate < 0.00001 and temp_peak < delta_seconds * 2:
-        rate = 0
-
-    return max(0.0, rate)
-
-
-def virtual_model(
-    A: FloatArray,
-    t: int,
-    peak_time: int | None,
-    lambdas: FloatArray,
-    target_effect: bool,
-) -> float:
+    ``target`` selects plasma or effect-site targeting. :meth:`run` does a
+    whole closed loop; :meth:`rate` and :meth:`step` do one step, e.g. to clip
+    the rate to what a pump can deliver before stepping.
     """
-    Predict drug concentration at time t given current compartment amounts
-    """
-    # Probably this function should be replaced by update() with rate = 0 +/- lru_cache
-    if target_effect and peak_time is not None and t > peak_time + 1:
-        raise ValueError("Error: Time error in virtual_model")
 
-    decay = np.exp(-lambdas * t)
-    return float(np.sum(A * decay))
+    def __init__(
+        self,
+        model: LinearPKModel | PKParameters,
+        delta_seconds: float = 10,
+        target: Literal["effect", "plasma"] = "effect",
+        plasma_switch: float = 0.05,
+    ):
+        system = _controller_system(model)
+        if target == "effect" and not system.pk.has_effect_site:
+            raise ValueError("Effect-site targeting needs a model with an effect site")
+        self.V1 = system.pk.V1
+        self.has_effect_site = system.pk.has_effect_site
+        self.lag = system.lag
+        self.delta_seconds = float(delta_seconds)
+        self.target = target
+        self.plasma_switch = plasma_switch
 
+        B = np.zeros(len(system.x0))
+        B[0] = 1.0
+        modes = eigendecomposition(system.S, B, system.f)
+        self._lambdas = modes.lambdas
+        self._V = modes.eigvecs
+        self._Vinv = np.linalg.inv(modes.eigvecs)
+        self._alpha_B = modes.alpha_B
+        self._alpha_f = modes.alpha_f
 
-def find_peak(
-    current_time: int,
-    rate: float,
-    Ae: FloatArray,
-    peak_time: int,
-    lambdas: FloatArray,
-    e_udf: FloatArray,
-    delta_seconds: int,
-) -> int:
-    """Find the time when effect site concentration will peak"""
+        self.time = 0.0  # s, time of the next decision
+        self.state = system.x0  # body state at time + lag
+        self.peak_time = self._unit_peak_time() if self.has_effect_site else None
 
-    # Calculate concentrations at three time points
-    current = (
-        virtual_model(Ae, current_time, peak_time, lambdas, True)
-        + e_udf[current_time] * rate
-    )
-    earlier = (
-        virtual_model(Ae, current_time - 1, peak_time, lambdas, True)
-        + e_udf[current_time - 1] * rate
-    )
-    later = (
-        virtual_model(Ae, current_time + 1, peak_time, lambdas, True)
-        + e_udf[current_time + 1] * rate
-    )
+    # ---- the model ------------------------------------------------------
 
-    # Search for peak
-    while current < earlier or current < later:
-        if current < earlier:
-            if current_time == delta_seconds:
-                return current_time
-            current_time -= 1
-            later = current
-            current = earlier
-            earlier = (
-                virtual_model(Ae, current_time, peak_time, lambdas, True)
-                + e_udf[current_time] * rate
-            )
+    def advance(self, x: FloatArray, rate: float, dt: float) -> FloatArray:
+        """State ``dt`` seconds after ``x`` with a constant ``rate`` (exact)."""
+        lam = self._lambdas
+        modal = self._Vinv @ x
+        modal = modal * np.exp(-lam * dt) + (
+            self._alpha_B * rate + self._alpha_f
+        ) * phi(lam, dt)
+        return self._V @ modal
+
+    def unit_response(self, t: float) -> FloatArray:
+        """State at ``t`` after 1/s during one step, from an empty body.
+
+        Infusion only, no endogenous production: the UDF of every compartment.
+        """
+        lam, delta = self._lambdas, self.delta_seconds
+        if t <= delta:
+            modal = self._alpha_B * phi(lam, t)
         else:
-            current_time += 1
-            earlier = current
-            current = later
-            later = (
-                virtual_model(Ae, current_time + 1, peak_time, lambdas, True)
-                + e_udf[current_time + 1] * rate
+            modal = self._alpha_B * phi(lam, delta) * np.exp(-lam * (t - delta))
+        return self._V @ modal
+
+    def cp(self, x: FloatArray) -> float:
+        return float(x[0] / self.V1)
+
+    def ce(self, x: FloatArray) -> float:
+        return float(x[-1])
+
+    def _unit_peak_time(self) -> float:
+        """Time of the maximum of the effect-site UDF."""
+        res = minimize_scalar(
+            lambda t: -self.ce(self.unit_response(t)),
+            bounds=(self.delta_seconds, PEAK_SEARCH_LIMIT),
+            method="bounded",
+            options={"xatol": PEAK_TIME_TOLERANCE},
+        )
+        return float(res.x)
+
+    # ---- the controller -------------------------------------------------
+
+    def rate(self, target: float) -> float:
+        """Rate (amount/s) for the next step to reach ``target``."""
+        if self.target == "plasma":
+            return self._plasma_rate(target)
+        if abs(target - self.ce(self.state)) < self.plasma_switch * target:
+            return self._plasma_rate(target)
+        return self._effect_rate(target)
+
+    def _plasma_rate(self, target: float) -> float:
+        """Rate that brings Cp to ``target`` at the end of the step."""
+        delta = self.delta_seconds
+        cp_free = self.cp(self.advance(self.state, 0.0, delta))
+        rate = (target - cp_free) / self.cp(self.unit_response(delta))
+        return max(0.0, rate)
+
+    def _effect_rate(self, target: float) -> float:
+        """Rate whose Ce peak is at ``target``."""
+        x, delta = self.state, self.delta_seconds
+        assert self.peak_time is not None
+
+        def ce_free(s: float) -> float:
+            return self.ce(self.advance(x, 0.0, s))
+
+        def udf(s: float) -> float:
+            return self.ce(self.unit_response(s))
+
+        if ce_free(delta) > target:  # already above target: let it decay
+            return 0.0
+
+        def rate_for(peak: float) -> float:
+            """Rate that puts Ce at ``target`` at time ``peak``."""
+            return (target - ce_free(peak)) / udf(peak)
+
+        def next_peak(peak: float) -> float:
+            """When Ce actually peaks with ``rate_for(peak)``."""
+            rate = rate_for(float(peak))
+            if rate <= 0:
+                return peak
+            res = minimize_scalar(
+                lambda s: -(ce_free(s) + rate * udf(s)),
+                bounds=(delta, self.peak_time),
+                method="bounded",
+                options={"xatol": PEAK_TIME_TOLERANCE},
             )
+            return res.x
 
-    return current_time
+        peak = fixed_point(
+            next_peak,
+            self.peak_time,
+            xtol=FIXED_POINT_TOLERANCE,
+            method="iteration",
+        )
+        return max(0.0, rate_for(float(peak)))
 
+    def step(self, rate: float) -> None:
+        """Infuse ``rate`` (amount/s) for one step."""
+        self.state = self.advance(self.state, rate, self.delta_seconds)
+        self.time += self.delta_seconds
 
-def update(
-    A: FloatArray,
-    lambdas: FloatArray,
-    coefs: FloatArray,
-    rate: float,  # rate in units/second
-    dt: int,  # time in seconds
-) -> FloatArray:
-    ls = np.exp(-lambdas * dt)
-    return A * ls + coefs * rate * (1 - ls)
+    def run(self, targets: NDArray | list[float]) -> TCIResult:
+        """Closed loop, one target per step, from the current state."""
+        t, rates, cp, ce = [], [], [], []
+        for target in targets:
+            t.append(self.time)
+            rate = self.rate(target)
+            self.step(rate)
+            rates.append(rate)
+            cp.append(self.cp(self.state))
+            ce.append(self.ce(self.state))
+        return TCIResult(
+            np.array(t),
+            np.array(rates),
+            np.array(cp),
+            np.array(ce) if self.has_effect_site else None,
+        )

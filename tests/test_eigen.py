@@ -3,7 +3,7 @@ import pytest
 from scipy.integrate import solve_ivp
 
 from pypmx import eigen
-from pypmx.tci import stanpump_order
+from pypmx.stanpump_tci import stanpump_order
 from pypmx.utils import rate_at
 
 
