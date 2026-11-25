@@ -112,8 +112,11 @@ def eig_advan(
     modes = eigendecomposition(S, B, f, y0, real_eigenvalues)
 
     t0 = min(infu_time.min(), meas_time.min())
-    all_times = np.unique(np.concatenate([[t0], infu_time + lag, meas_time]))
-    rates = rate_at(all_times[:-1] - lag, infu_time, infu_rate)
+    lagged_time = infu_time + lag
+    all_times = np.unique(np.concatenate([[t0], lagged_time, meas_time]))
+    # Compare against the lagged times themselves: ``(t + lag) - lag`` can
+    # round below ``t`` and pick the previous rate for a whole segment.
+    rates = rate_at(all_times[:-1], lagged_time, infu_rate)
 
     A = modes.y0_mod
     states = np.empty((len(all_times),) + A.shape, dtype=A.dtype)

@@ -113,6 +113,19 @@ def test_lag_shifts_response():
     np.testing.assert_allclose(lagged, shifted, rtol=1e-10, atol=1e-12)
 
 
+def test_lag_rounding_keeps_the_right_rate():
+    """``(t + lag) - lag`` rounds below t here; each segment keeps its own rate."""
+    S, B = three_comp_ce(np.random.default_rng(7))
+    lag = 21.48 / 60
+    infu_time = np.arange(20) / 6  # every 10 s, in min
+    assert np.any((infu_time + lag) - lag < infu_time)
+    infu_rate = np.arange(20.0)[::-1]
+    meas = infu_time + lag + 1 / 6
+    lagged = eigen.eig_advan(S, B, meas, infu_time, infu_rate, lag=lag)
+    shifted = eigen.eig_advan(S, B, meas, infu_time + lag, infu_rate)
+    np.testing.assert_allclose(lagged, shifted, rtol=1e-12)
+
+
 def test_zero_eigenvalue_is_finite():
     # Pure integrator: x' = r  =>  x = r·t during the infusion.
     t = np.linspace(0, 10, 11)
